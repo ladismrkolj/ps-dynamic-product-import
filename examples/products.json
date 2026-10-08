@@ -1,0 +1,28 @@
+[
+  {
+    "product_id": "DEMO-JSON-1",
+    "name": "Demo sail",
+    "price": 149.9,
+    "regular_price": 179.9,
+    "brand": "Demo Watersports",
+    "category": "Demo Sails",
+    "quantity": 3,
+    "weight": 2.5,
+    "active": true,
+    "description": "Synthetic local test product.",
+    "images": []
+  },
+  {
+    "product_id": "DEMO-JSON-2",
+    "name": "Demo fin",
+    "price": 39.9,
+    "regular_price": 39.9,
+    "brand": "Demo Watersports",
+    "category": "Demo Accessories",
+    "quantity": 0,
+    "weight": 0.4,
+    "active": false,
+    "description": "Out-of-stock synthetic test product.",
+    "images": []
+  }
+]

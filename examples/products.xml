@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog><products>
+  <product id="DEMO-XML-1"><product_id>DEMO-XML-1</product_id><name>Demo board</name><price>499.90</price><regular_price>599.90</regular_price><brand>Demo Watersports</brand><category>Demo Boards</category><quantity>2</quantity><weight>8.0</weight><active>1</active><description>Synthetic XML test product.</description></product>
+  <product id="DEMO-XML-2"><product_id>DEMO-XML-2</product_id><name>Demo leash</name><price>19.90</price><regular_price>19.90</regular_price><brand>Demo Watersports</brand><category>Demo Accessories</category><quantity>0</quantity><weight>0.2</weight><active>0</active><description>Out-of-stock synthetic XML test product.</description></product>
+</products></catalog>

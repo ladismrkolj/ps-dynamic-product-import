@@ -1,81 +1,104 @@
-# Local PrestaShop 9 test environment
+# Local PrestaShop test store
 
-A fully self-contained, throwaway PrestaShop 9.1.5 + MySQL 8 stack for
-manually testing `prestashop-product-import/` against a real PrestaShop
-instance. Everything lives in Docker containers and named volumes — nothing
-is installed system-wide, and nothing outside this directory is touched
-except `../prestashop-product-import/` (bind-mounted read-write so edits on
-the host show up immediately).
+A disposable PrestaShop **9.1.5 / PHP 8.3** and MySQL 8 store for this standalone
+module. Docker bind-mounts the repository as `modules/productimport/`. The
+shop is exposed only on localhost; the database has no published port.
 
-## Requirements
+## Requirements and first run
 
-[Colima](https://github.com/abiosoft/colima) + the `docker` CLI (installed
-via `brew install colima docker docker-compose`, see the repo's main
-history for the exact setup). Nothing else — no local PHP/MySQL needed for
-this environment (the module's own `composer install`/`phpunit`/
-`php-cs-fixer` gates still run directly on the host from
-`prestashop-product-import/`, separately from this container stack).
-
-## Start
+Use Docker Desktop, Docker Engine with Compose v2, or an existing Colima setup
+(`colima start` on macOS). Images and Composer packages need network access.
+No host PHP or Composer installation is required. From the repository root:
 
 ```sh
-colima start   # if not already running
+./local-dev/dev.sh test
+./local-dev/dev.sh up
+./local-dev/dev.sh logs
+```
+
+The script copies `.env.example` to ignored `.env` on first use. It contains
+local development defaults only; change them before first boot if desired.
+Environment changes do not reset accounts in an already-initialized database.
+`up` builds store tools, installs production Composer dependencies in the
+`module_vendor` volume, then starts the stack. First boot auto-installs the
+store and may take several minutes. Wait until installation completes in
+logs and the storefront responds before installing the module:
+
+```sh
+./local-dev/dev.sh install
+```
+
+- Storefront: http://localhost:8080/
+- Back office: http://localhost:8080/admin-dev/
+- Login: `ADMIN_MAIL` / `ADMIN_PASSWD` from `.env`.
+- Module screens: Catalog → Product Import / Product Import runs.
+
+`HOST_PORT` in `.env` changes the port if 8080 is in use. For an already
+installed module use PrestaShop's module upgrade action; reinstalling can
+remove its source configuration.
+
+## Unit tests and formatting
+
+`dev.sh test` runs the locked Composer dev dependencies, PHPUnit and
+PHP-CS-Fixer in **PHP 8.4**, because the locked PHPUnit 13 cannot run under
+PHP 8.3. A separate `test_vendor` volume keeps dev dependencies away from the
+store's production `module_vendor`. Test failures propagate as a nonzero exit.
+
+To apply formatting intentionally:
+
+```sh
 cd local-dev
-docker compose up -d
+docker compose run --rm --entrypoint sh php-tests -ec 'composer install --no-interaction && vendor/bin/php-cs-fixer fix'
 ```
 
-First boot auto-installs PrestaShop (a few minutes). Watch progress with
-`docker compose logs -f prestashop`. Once up:
+PHP 8.4 unit tests alone do not establish PHP 8.3 store compatibility. The
+store tools install production dependencies on the actual PHP 8.3 image.
+For changed PHP files, also run `php -l` in the running store container.
 
-- Shop front: <http://localhost:8080/>
-- Admin back office: <http://localhost:8080/admin-dev/> — `admin@example.com`
-  / the password in `.env` (`ADMIN_PASSWD`)
-- Product Import admin pages: Catalog → Product Import / Product Import runs
+## Store integration tests
 
-## The module's `vendor/`
+Follow [the JSON and XML examples](../examples/README.md) to configure two
+sources from read-only files already mounted into the store at
+`/opt/productimport-examples/`. Test source and Test configuration should both
+work. Import each source, verify the four DEMO products, then import again and
+verify that product IDs/counts stay stable. Check stock, active status, brand,
+category and discounted price. Record each result.
 
-The container gets its **own** production (`--no-dev`), PHP-8.3-matched
-`vendor/` via a separate named volume (`module_vendor`) that shadows the
-module directory's `vendor/` subpath — it does NOT reuse the host's
-dev-dependency `vendor/` (which includes PHPUnit/PHP-CS-Fixer and is built
-against whatever PHP happens to be on the host). Rebuild it after a
-`composer.lock` change:
+These are manual integration checks; `dev.sh test` runs unit tests only.
+No example image URLs are included, so these minimal feeds need no external
+fetches. Images, combinations, cron and background-process spawning require
+additional checks when relevant to a change.
+
+## Editing and troubleshooting
+
+Changes in `src/`, `controllers/`, `views/` and the module entrypoint appear
+through the bind mount. If opcache masks a change:
 
 ```sh
-docker run --rm \
-  -v "$(pwd)/../prestashop-product-import:/app" \
-  -v productimport-dev_module_vendor:/app/vendor \
-  -w /app \
-  composer:2 install --no-dev --optimize-autoloader --no-interaction
-docker compose restart prestashop   # opcache doesn't always pick up bind-mount changes on its own
+cd local-dev
+docker compose restart prestashop
+docker compose logs --tail=100 prestashop
+docker compose exec --user www-data prestashop php bin/console prestashop:module list
 ```
 
-## Editing the module while it's running
+After changing composer.lock, rerun `dev.sh up` to refresh the production
+vendor volume. If installation fails, inspect logs and container health; do
+not erase volumes to hide failures. A Composer platform mismatch is a failure
+to fix, not a reason to disable platform checks.
 
-Edits under `../prestashop-product-import/src/`, `controllers/`,
-`views/`, etc. are live immediately (bind mount) — but PHP's opcache
-(`opcache.validate_timestamps=On`) doesn't always notice a changed mtime
-through Colima's virtiofs mount promptly. If a code change doesn't seem to
-take effect, `docker compose restart prestashop`.
-
-## Useful commands
+## Stop or erase
 
 ```sh
-docker compose logs -f prestashop              # tail the PrestaShop container's log
-docker compose exec prestashop bash             # shell inside the container
-docker compose exec prestashop php bin/console prestashop:module install productimport
-docker compose exec prestashop php bin/console prestashop:module uninstall productimport
-docker compose exec db mysql -uroot -pprestashop prestashop   # DB shell
+./local-dev/dev.sh stop
 ```
 
-## Tear down
+This preserves the database and store. Only when explicitly authorized to
+erase the local store, run `cd local-dev && docker compose down -v`. That
+deletes the database, store files and both dependency volumes.
 
-```sh
-docker compose down -v   # stops containers AND deletes the named volumes (db + PS files + module vendor)
-```
+## Packaging
 
-Nothing persists outside Docker's own volume store — deleting them (or
-just never running this stack again) leaves zero trace on the host beyond
-the `colima`/`docker`/`docker-compose` Homebrew formulae themselves
-(`brew uninstall colima docker docker-compose && colima delete` removes
-those too, if desired).
+The PrestaShop technical name remains **productimport**. Deploy module code
+and production `vendor/` under `modules/productimport/`. Keep `local-dev/`,
+`examples/`, `tests/` and dev dependencies out of a release archive. Never
+package the local `.env`. The repository name is not the module technical name.

@@ -1,0 +1,4 @@
+FROM composer:2 AS composer
+ARG PS_IMAGE_TAG=9.1.5-8.3
+FROM prestashop/prestashop:${PS_IMAGE_TAG}
+COPY --from=composer /usr/bin/composer /usr/local/bin/composer

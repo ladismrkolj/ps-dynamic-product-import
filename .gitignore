@@ -2,3 +2,6 @@
 /.composer-cache/
 /.phpunit.cache/
 /.php-cs-fixer.cache
+
+/local-dev/.env
+.DS_Store
