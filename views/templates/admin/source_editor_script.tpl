@@ -630,6 +630,12 @@
       }
       identifierWarning.textContent = message.trim();
       identifierWarning.style.display = message ? '' : 'none';
+      var infoValue = document.getElementById('pi-identifier-info-value');
+      var infoWarning = document.getElementById('pi-identifier-info-warning');
+      var infoCol = value === '' ? null : schema.columns.filter(function (item) { return item.parts.length === 1 && String(item.parts[0]) === value && item.kind === 'scalar'; })[0];
+      infoValue.textContent = value === '' ? '— not set —' : (infoCol ? identifierLabel(infoCol, false) : value);
+      infoWarning.textContent = message.trim();
+      infoWarning.style.display = message ? '' : 'none';
       identifierNote.textContent = identifierSuggested !== '' && !identifierTouched && identifier.value === identifierSuggested ?
         'Suggested from the feed: it is unique and present on every product. Change it if another field identifies your products.' : '';
     }
@@ -664,6 +670,11 @@
       renderIdentifier();
     });
     identifier.addEventListener('input', function () { identifierTouched = true; identifierChoice = '__other__'; updateIdentifierWarning(); });
+    document.getElementById('pi-identifier-info-change').addEventListener('click', function (event) {
+      event.preventDefault();
+      document.getElementById('pi-general-link').click();
+      setTimeout(function () { (identifierPicker.value === '__other__' ? identifier : identifierPicker).focus(); }, 0);
+    });
     function renderAll() {
       renderReference();
       renderVariantsList();
