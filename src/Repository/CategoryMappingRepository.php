@@ -4,6 +4,7 @@ namespace ProductImport\Repository;
 
 class CategoryMappingRepository
 {
+    /** @return list<array> every mapping row of the source (including `date_seen`, NULL for rows not seen in a feed yet) */
     public function findAllForSource(int $idSource): array
     {
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_category_mapping` WHERE `id_source` = ' . (int) $idSource . ' ORDER BY `id_mapping`');
@@ -25,12 +26,38 @@ class CategoryMappingRepository
 
     public function upsertSeen(int $idSource, string $hash, string $sourcePath): void
     {
+        $now = pSQL(date('Y-m-d H:i:s'));
         if (!\Db::getInstance()->execute(
-            'INSERT INTO `' . _DB_PREFIX_ . 'pi_category_mapping` (`id_source`, `source_path_hash`, `source_path`, `date_upd`) VALUES ('
-            . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', '" . pSQL(date('Y-m-d H:i:s'))
-            . "') ON DUPLICATE KEY UPDATE `date_upd` = VALUES(`date_upd`)"
+            'INSERT INTO `' . _DB_PREFIX_ . 'pi_category_mapping` (`id_source`, `source_path_hash`, `source_path`, `date_seen`, `date_upd`) VALUES ('
+            . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', '" . $now . "', '" . $now
+            . "') ON DUPLICATE KEY UPDATE `date_seen` = VALUES(`date_seen`), `date_upd` = VALUES(`date_upd`)"
         )) {
             throw new \RuntimeException('Unable to record category path.');
+        }
+    }
+
+    /** Adds a row by hand (not seen in a feed yet). Returns false when the source already has that path. */
+    public function createManual(int $idSource, string $hash, string $sourcePath, ?int $idCategory): bool
+    {
+        $db = \Db::getInstance();
+        if (!$db->execute(
+            'INSERT IGNORE INTO `' . _DB_PREFIX_ . 'pi_category_mapping` (`id_source`, `source_path_hash`, `source_path`, `id_category`, `date_upd`) VALUES ('
+            . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', " . ($idCategory === null ? 'NULL' : (int) $idCategory)
+            . ", '" . pSQL(date('Y-m-d H:i:s')) . "')"
+        )) {
+            throw new \RuntimeException('Unable to add category mapping.');
+        }
+
+        return $db->Affected_Rows() > 0;
+    }
+
+    /** Deletes one row of the given source only. */
+    public function delete(int $idSource, string $hash): void
+    {
+        if (!\Db::getInstance()->execute(
+            'DELETE FROM `' . _DB_PREFIX_ . 'pi_category_mapping` WHERE `id_source` = ' . (int) $idSource . " AND `source_path_hash` = '" . pSQL($hash) . "'"
+        )) {
+            throw new \RuntimeException('Unable to delete category mapping.');
         }
     }
 

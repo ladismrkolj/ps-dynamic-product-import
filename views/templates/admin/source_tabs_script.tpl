@@ -18,7 +18,7 @@
     var config = document.getElementById('pi-configuration-panel');
     // Move existing nodes, never clone them: values, IDs, names and listeners survive.
     product.appendChild(config);
-    var controls = ['name', 'technical_key', 'json_url', 'json_file_path', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'id_lang_default', 'active', 'deactivate_missing'];
+    var controls = ['name', 'technical_key', 'location', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'id_lang_default', 'active', 'deactivate_missing'];
     var selected = new Set();
     function selectGroup(element) {
       if (!element) return;

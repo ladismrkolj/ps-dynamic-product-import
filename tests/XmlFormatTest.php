@@ -3,9 +3,9 @@
 namespace ProductImport\Tests;
 
 use PHPUnit\Framework\TestCase;
-use ProductImport\Service\XmlFetcher;
+use ProductImport\Service\Format\XmlFormat;
 
-class XmlFetcherTest extends TestCase
+class XmlFormatTest extends TestCase
 {
     public function testConvertsLeafTextAndAttributes(): void
     {
@@ -16,13 +16,13 @@ class XmlFetcherTest extends TestCase
             'empty' => ['@attributes' => ['id' => '2'], '@value' => ''],
             'category' => ['@attributes' => ['id' => '407'], 'name' => 'Vsi izdelki'],
             'brand' => 'UNIFIBER',
-        ]], (new XmlFetcher())->parse($xml, 'product'));
+        ]], (new XmlFormat())->parse($xml, ['xml_item_path' => 'product']));
     }
 
     public function testConvertsItemsAndResolvesSiblings(): void
     {
         $xml = '<catalog><products><product id="A1"><name> Board </name><tag>one</tag><tag>two</tag><detail><color>blue</color></detail></product><product id="A2"><name>Sail</name></product></products></catalog>';
-        $items = (new XmlFetcher())->parse($xml, 'products/product');
+        $items = (new XmlFormat())->parse($xml, ['xml_item_path' => 'products/product']);
         self::assertSame([
             ['@attributes' => ['id' => 'A1'], 'name' => 'Board', 'tag' => ['one', 'two'], 'detail' => ['color' => 'blue']],
             ['@attributes' => ['id' => 'A2'], 'name' => 'Sail'],
@@ -33,13 +33,19 @@ class XmlFetcherTest extends TestCase
     {
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage("No items found at path 'products/missing'");
-        (new XmlFetcher())->parse('<catalog><products><product /></products></catalog>', 'products/missing');
+        (new XmlFormat())->parse('<catalog><products><product /></products></catalog>', ['xml_item_path' => 'products/missing']);
     }
 
     public function testMalformedXmlThrows(): void
     {
         $this->expectException(\RuntimeException::class);
         $this->expectExceptionMessage('Invalid XML:');
-        (new XmlFetcher())->parse('<catalog>', 'product');
+        (new XmlFormat())->parse('<catalog>', ['xml_item_path' => 'product']);
+    }
+
+    public function testMissingItemPathThrows(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        (new XmlFormat())->parse('<catalog/>', []);
     }
 }

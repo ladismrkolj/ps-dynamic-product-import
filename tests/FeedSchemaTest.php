@@ -135,4 +135,41 @@ class FeedSchemaTest extends TestCase
         self::assertSame(1, $schema['columns'][0]['present']);
         self::assertSame(['columns' => [], 'total' => 0, 'truncated' => false], (new FeedSchema())->scan([]));
     }
+
+    public function testDistinctCountsNonEmptyTopLevelScalars(): void
+    {
+        $columns = $this->columns([
+            ['id' => 1, 'name' => 'A', 'tags' => ['x'], 'info' => ['sku' => 'S1']],
+            ['id' => 2, 'name' => 'A', 'tags' => ['y'], 'info' => ['sku' => 'S1']],
+            ['id' => '2', 'name' => ''],
+        ]);
+        self::assertSame(2, $columns['id']['distinct']);
+        self::assertSame(3, $columns['id']['present']);
+        self::assertSame(1, $columns['name']['distinct']);
+        self::assertSame(2, $columns['name']['present']);
+        self::assertNull($columns['tags[*]']['distinct']);
+        self::assertNull($columns['info.sku']['distinct']);
+        self::assertNull($columns['info']['distinct']);
+    }
+
+    public function testUniquenessWithMissingValues(): void
+    {
+        $columns = $this->columns([['sku' => 'a'], ['sku' => 'b'], ['sku' => null], ['other' => 1]]);
+        $sku = $columns['sku'];
+        // Distinct equals present (no duplicates) but not total: missing values mean it is not a full identifier.
+        self::assertSame($sku['present'], $sku['distinct']);
+        self::assertSame(2, $sku['distinct']);
+        self::assertNotSame($sku['total'], $sku['present']);
+    }
+
+    public function testDistinctIsCapped(): void
+    {
+        $items = [];
+        for ($i = 0; $i <= FeedSchema::MAX_DISTINCT; ++$i) {
+            $items[] = ['id' => $i];
+        }
+        $id = $this->columns($items)['id'];
+        self::assertSame(FeedSchema::MAX_DISTINCT + 1, $id['present']);
+        self::assertSame(FeedSchema::MAX_DISTINCT, $id['distinct']);
+    }
 }

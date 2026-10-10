@@ -12,9 +12,9 @@ Package this directory as `productimport/` under PrestaShop's `modules/`, with p
 
 ## Quick start
 
-1. **Catalog > Product Import > + Add source.** Fill in **Name**, a unique lowercase **Technical key** (`a-z`, `0-9`, `_`, `-`), the **Format** (JSON or XML) and exactly one of **URL** or **file path**. A non-empty URL wins over a file path. A file path is read from the PrestaShop server's disk. XML needs an **XML item path** (see "XML feeds").
-2. Save. The Product fields tab **loads the feed automatically**. It scans every product and lists each feed field with coverage and samples. It reloads when the URL, path, format or item path changes. **Refresh feed** bypasses the 15-minute cache.
-3. Pick the **Identifier field**, a key that is unique per product within the source, so re-imports update products instead of duplicating them.
+1. **Catalog > Product Import > + Add source.** Fill in **Name**, a unique lowercase **Technical key** (`a-z`, `0-9`, `_`, `-`), a **Source** and the **Format** (JSON or XML). A Source starting with `http://` or `https://` is downloaded; anything else is a file path. File paths must stay inside the import folder (configuration `PIIMPORT_FEED_DIR`, default `var/productimport/feeds` under the shop root, editable in the **Import folder** panel on the source list); relative paths resolve inside it, absolute paths and symlinks must resolve inside it, and other schemes (`file://`, `php://`, `ftp://`) are rejected. The file need not exist when you save. XML needs an **XML item path** (see "XML feeds").
+2. The Product fields tab **loads the feed automatically** as soon as the source is set, even before the first save. It scans every product and lists each feed field with coverage and samples. It reloads when the source, format or item path changes. **Refresh feed** bypasses the 15-minute cache. For a saved source the load also records the categories and brands found, using the saved `category_paths` and `manufacturer` expressions; the status line shows the counts and how many are new.
+3. Pick the **Identifier field**, a key that is unique per product within the source, so re-imports update products instead of duplicating them. The picker lists top-level fields with coverage and uniqueness (`product_id · 80/80 · unique ✓`, `name · 80/80 · 3 duplicates`, `sku · 78/80 · missing in 2`), best first. A new source gets the best candidate pre-selected and marked *suggested*. A warning appears if the chosen field is not unique (duplicates overwrite each other) or missing on some products (those are skipped); saving is never blocked.
 4. For each PrestaShop field, pick the **Feed field** that fills it, or **Formula…** to write an expression.
 5. Check the **Preview** table. It maps the first 20 products with the form's current (even unsaved) mapping, without writing anything, and shows per-cell errors, filter results and variant counts. Products with variants have a "▸ N variants" button that expands sub-rows (up to 5 variants) with attributes, reference, EAN-13, price and its impact versus the base price, quantity, active and image.
 6. Save, then **Run import now**. Or run one or all sources from the source list, or schedule them (see "Running imports").
@@ -186,23 +186,24 @@ After a successful fetch, with `deactivate_missing` on, every linked product not
 
 ## Config export and import
 
-The source list has an **Export** row action that downloads `<technical_key>.productimport.yml`, and an **Import source configuration** panel (file upload or pasted text). The file is YAML with `format: productimport-source` and `version: 1`. It holds the full configuration: settings, source language as ISO code, `field_mapping` (`field: expression`, multi-line as `|` blocks), `variant_mapping`, and category and brand mappings. It uses names instead of IDs: root and default categories as `Home > Sport` paths below the shop root, and default brand and supplier by name. It never contains the cron token, products or run history.
+The source list has an **Export** row action that downloads `<technical_key>.productimport.yaml`, and an **Import source configuration** panel (file upload or pasted text). The file is YAML with `format: productimport-source` and `version: 1`. It holds the full configuration: settings, source language as ISO code, `field_mapping` (`field: expression`, multi-line as `|` blocks), `variant_mapping`, and category and brand mappings. It uses names instead of IDs: root and default categories as `Home > Sport` paths below the shop root, and default brand and supplier by name. It never contains the cron token, products or run history.
 
 ```yaml
+source:
+  location: https://example.com/feed.json   # URL, or a file path inside the import folder
 category_mappings:
-  - feed: Windsurf > Sails        # feed category path
-    category: Home > Boards       # PrestaShop path; null = auto-create
+  Windsurf > Sails: Home > Boards   # feed category path: PrestaShop path
+  Demo Fins: ~                      # ~ or null = auto-create
 brand_mappings:
-  - feed: Duotone
-    brand: Duotone                # null = auto-create
+  Demo Watersports: Graphic Corner
 ```
 
-Paths split on ` > `. A YAML list is also accepted and is exported when a name contains ` > `.
+Paths are joined with ` > `. A category name that itself contains ` > ` cannot be written; export and import reject it. Each feed value may appear once (a duplicate key is an error). Entries for feed categories or brands the feed has not shown yet are stored as pre-mapped rows ("not seen yet" in the editor) and apply once the feed contains them.
 
 - **Create new source** (default) never touches existing sources. A taken key becomes `<key>_2`, `_3`, … and ` (imported)` is appended to the name.
-- **Overwrite existing source** (needs edit permission) applies the file in one transaction. Settings in the file replace the source's settings and missing ones stay. `technical_key` never changes. A present `field_mapping` or `variant_mapping` replaces the whole mapping. Each listed category or brand entry is added or updated, and entries not listed stay. `category: null` (or `brand: null`) or an omitted target resets that entry to auto-create. The merged source is validated like the form. Changed mappings make the next run reimport affected products.
+- **Overwrite existing source** (needs edit permission) applies the file in one transaction. Settings in the file replace the source's settings and missing ones stay. `technical_key` never changes. A present `field_mapping` or `variant_mapping` replaces the whole mapping. Each listed category or brand entry is added or updated, and entries not listed stay. `~` resets that entry to auto-create. The merged source is validated like the form. Changed mappings make the next run reimport affected products.
 
-Names are matched in this store: categories by exact, case-sensitive path from the shop root in the source's language (each segment must match exactly one category), brands and suppliers by exact name, and the language by ISO code. Unmatched names are left unset (new source) or unchanged (overwrite), and are listed as warnings. Import never creates categories or brands. Files over 1 MB, unknown format or version, and invalid values are rejected.
+Names are matched in this store: categories by exact, case-sensitive path from the shop root in the source's language (each segment must match exactly one category), brands and suppliers by exact name, and the language by ISO code. Unmatched settings are left unset (new source) or unchanged (overwrite). A mapping entry whose destination category or brand does not exist is skipped with a warning: an existing row stays as it is and no row is created. Import never creates categories or brands. Files over 1 MB, unknown format or version, and invalid values are rejected.
 
 ## Removing duplicate images
 

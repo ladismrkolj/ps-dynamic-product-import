@@ -10,7 +10,8 @@ use ProductImport\Repository\SourceRepository;
 class ImportRunner
 {
     public function __construct(
-        private JsonFetcher $fetcher,
+        /** @var callable(array): array */
+        private $fetcher,
         private ProductFilter $filter,
         private ProductFieldMapper $mapper,
         private CategoryPathNormalizer $normalizer,
@@ -25,7 +26,6 @@ class ImportRunner
         private SourceRepository $sourceRepository,
         private ImportRunRepository $runs,
         private ImportCatalog $catalog,
-        private ?XmlFetcher $xmlFetcher = null,
         private ?string $moduleVersion = null
     ) {
     }
@@ -38,7 +38,7 @@ class ImportRunner
         $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0];
         $log = '';
         try {
-            $items = FeedFetcher::fetch($source, $this->fetcher, $this->xmlFetcher);
+            $items = ($this->fetcher)($source);
         } catch (\Throwable $error) {
             $log = ImportRunRepository::capLog($error->getMessage());
             $this->runs->finish($idRun, 'failed', $counts, $log);

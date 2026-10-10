@@ -4,6 +4,7 @@ namespace ProductImport\Repository;
 
 class ManufacturerMappingRepository
 {
+    /** @return list<array> every mapping row of the source (including `date_seen`, NULL for rows not seen in a feed yet) */
     public function findAllForSource(int $idSource): array
     {
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` WHERE `id_source` = ' . (int) $idSource . ' ORDER BY `id_mapping`');
@@ -25,12 +26,38 @@ class ManufacturerMappingRepository
 
     public function upsertSeen(int $idSource, string $name): void
     {
+        $now = pSQL(date('Y-m-d H:i:s'));
         if (!\Db::getInstance()->execute(
-            'INSERT INTO `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` (`id_source`, `source_name`, `date_upd`) VALUES ('
-            . (int) $idSource . ", '" . pSQL($name, true) . "', '" . pSQL(date('Y-m-d H:i:s'))
-            . "') ON DUPLICATE KEY UPDATE `date_upd` = VALUES(`date_upd`)"
+            'INSERT INTO `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` (`id_source`, `source_name`, `date_seen`, `date_upd`) VALUES ('
+            . (int) $idSource . ", '" . pSQL($name, true) . "', '" . $now . "', '" . $now
+            . "') ON DUPLICATE KEY UPDATE `date_seen` = VALUES(`date_seen`), `date_upd` = VALUES(`date_upd`)"
         )) {
             throw new \RuntimeException('Unable to record manufacturer name.');
+        }
+    }
+
+    /** Adds a row by hand (not seen in a feed yet). Returns false when the source already has that name. */
+    public function createManual(int $idSource, string $name, ?int $idManufacturer): bool
+    {
+        $db = \Db::getInstance();
+        if (!$db->execute(
+            'INSERT IGNORE INTO `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` (`id_source`, `source_name`, `id_manufacturer`, `date_upd`) VALUES ('
+            . (int) $idSource . ", '" . pSQL($name, true) . "', " . ($idManufacturer === null ? 'NULL' : (int) $idManufacturer)
+            . ", '" . pSQL(date('Y-m-d H:i:s')) . "')"
+        )) {
+            throw new \RuntimeException('Unable to add brand mapping.');
+        }
+
+        return $db->Affected_Rows() > 0;
+    }
+
+    /** Deletes one row of the given source only. */
+    public function delete(int $idSource, string $name): void
+    {
+        if (!\Db::getInstance()->execute(
+            'DELETE FROM `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` WHERE `id_source` = ' . (int) $idSource . " AND `source_name` = '" . pSQL($name, true) . "'"
+        )) {
+            throw new \RuntimeException('Unable to delete brand mapping.');
         }
     }
 

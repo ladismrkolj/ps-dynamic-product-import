@@ -2,6 +2,8 @@
 
 namespace ProductImport\Service;
 
+use ProductImport\Service\Format\FeedFormats;
+
 /**
  * Disk cache of decoded feed items for the source editor only. Import runs fetch directly.
  */
@@ -30,9 +32,15 @@ class FeedCache
 
     public static function key(array $source): string
     {
-        $format = $source['source_format'] === 'xml' ? 'xml' : 'json';
+        $name = (string) ($source['source_format'] ?? 'json');
+        $parts = [$name, trim((string) ($source['location'] ?? ''))];
+        if (FeedFormats::has($name)) {
+            foreach (array_keys(FeedFormats::get($name)->options()) as $option) {
+                $parts[] = $option . '=' . trim((string) ($source[$option] ?? ''));
+            }
+        }
 
-        return sha1(implode('|', [$format, (string) ($source['json_url'] ?? ''), (string) ($source['json_file_path'] ?? ''), (string) ($source['xml_item_path'] ?? '')]));
+        return sha1(implode('|', $parts));
     }
 
     /**

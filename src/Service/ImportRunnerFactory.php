@@ -17,7 +17,7 @@ class ImportRunnerFactory
         $products = new ExternalProductRepository();
         $combinations = new ExternalCombinationRepository();
         return new ImportRunner(
-            new JsonFetcher(),
+            FeedFetcher::fetch(...),
             new ProductFilter($evaluator),
             new ProductFieldMapper($evaluator),
             $normalizer,
@@ -31,8 +31,7 @@ class ImportRunnerFactory
             $combinations,
             new SourceRepository(),
             new ImportRunRepository(),
-            new ImportCatalog(),
-            new XmlFetcher()
+            new ImportCatalog()
         );
     }
 }

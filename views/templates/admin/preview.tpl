@@ -1,9 +1,4 @@
-<div id="pi-preview" data-url="{$pi_preview_url|escape:'html':'UTF-8'}" data-source="{$pi_preview_id|intval}">
-  <h3>Test source</h3>
-  <p>Test the URL or file path entered above, even before saving. For saved sources, discovery uses the saved category and manufacturer expressions. The feed is fetched once and reused for 15 minutes; the Product fields tab lists the columns of all products.</p>
-  <button type="button" class="btn btn-default pi-test-source">Test source</button>
-  <div class="pi-source-results" aria-live="polite"></div>
-</div>
+<div id="pi-preview" data-url="{$pi_preview_url|escape:'html':'UTF-8'}" data-source="{$pi_preview_id|intval}"></div>
 <div id="pi-configuration-panel">
   <h3>Preview</h3>
   <p>Maps the first 20 products of the feed with the mapping currently on this form, without saving and without writing catalog data. Errors are highlighted per cell.</p>

@@ -18,6 +18,8 @@ final class FeedSchema
     public const MAX_COLUMNS = 1000;
     public const MAX_SAMPLES = 5;
     public const SAMPLE_LENGTH = 80;
+    /** Distinct values are counted per top-level scalar column up to this many, bounding memory on huge feeds. */
+    public const MAX_DISTINCT = 100000;
 
     private array $columns = [];
     private bool $truncated = false;
@@ -44,6 +46,7 @@ final class FeedSchema
                 'kind' => $kind,
                 'types' => array_keys($column['types']),
                 'present' => $column['present'],
+                'distinct' => count($column['parts']) === 1 && $column['kind'] === 'scalar' ? count($column['distinct']) : null,
                 'total' => count($items),
                 'samples' => $column['samples'],
                 'max_length' => $column['kind'] === 'list' ? $column['max'] : null,
@@ -105,6 +108,9 @@ final class FeedSchema
             $this->touch($column, $item, self::type($value), $present);
             if ($present) {
                 $this->sample($column, $value);
+                if (count($parts) === 1) {
+                    $this->distinct($column, $value);
+                }
             }
         }
     }
@@ -156,7 +162,7 @@ final class FeedSchema
                 return $none;
             }
             $this->columns[$id] = ['parts' => $parts, 'kind' => $kind, 'objects' => false, 'types' => [], 'present' => 0,
-                'samples' => [], 'max' => 0, 'last' => -1];
+                'samples' => [], 'max' => 0, 'last' => -1, 'distinct' => []];
         } elseif ($kind === 'object' && $this->columns[$id]['kind'] === 'scalar') {
             $this->columns[$id]['kind'] = 'object';
         }
@@ -185,6 +191,15 @@ final class FeedSchema
         if (!in_array($text, $column['samples'], true)) {
             $column['samples'][] = $text;
         }
+    }
+
+    /** Counts distinct non-empty values by their string form (1 and "1" are the same identifier); stops at MAX_DISTINCT. */
+    private function distinct(array &$column, mixed $value): void
+    {
+        if (count($column['distinct']) >= self::MAX_DISTINCT) {
+            return;
+        }
+        $column['distinct'][is_bool($value) ? ($value ? 'true' : 'false') : (string) $value] = true;
     }
 
     private static function type(mixed $value): string

@@ -31,21 +31,19 @@
       element.addEventListener('keydown', function (event) { if (event.key === 'Enter') event.preventDefault(); else expand(); });
       return element;
     }
-    function load(type) {
+    // Every reload takes a token; only the newest response renders, so overlapping loads never drop or clobber each other.
+    function load(type, notice) {
       var state = states[type];
-      if (!id || state.loading) return;
-      state.loading = true;
-      state.pane.textContent = 'Loading…';
+      if (!id) return;
+      var token = ++state.token;
+      if (!state.loaded) state.pane.textContent = 'Loading…';
       post('mappings', type).then(function (data) {
+        if (token !== state.token) return;
         state.loaded = true;
         state.pane.replaceChildren();
         var help = document.createElement('p');
-        help.textContent = data.rows.length + ' discovered. Changes here are saved immediately, independent of the main Save button.';
+        help.textContent = data.rows.length + ' listed. Changes here are saved immediately, independent of the main Save button. The feed is read automatically when the source settings change; rows appear here once the feed contains them.';
         state.pane.appendChild(help);
-        var refresh = document.createElement('button');
-        refresh.type = 'button'; refresh.className = 'btn btn-default'; refresh.textContent = 'Refresh from source';
-        refresh.addEventListener('click', function () { source.querySelector('.pi-test-source').click(); });
-        state.pane.appendChild(refresh);
         var label = document.createElement('label'); label.textContent = 'Default for anything not mapped below';
         state.pane.appendChild(label);
         var defaultSelect = select(data.options, data.default, 'Auto-create (no default)');
@@ -55,45 +53,80 @@
             var value = control.value;
             control.disabled = true; indicator.textContent = 'Saving…';
             post(action, type, key == null ? {value: value} : {key: key, value: value})
-              .then(function (result) { indicator.textContent = 'Saved'; if (status) status.textContent = result.status; if (action === 'saveDefault') { state.loading = false; load(type); } })
+              .then(function (result) { indicator.textContent = 'Saved'; if (status) status.textContent = result.status; if (action === 'saveDefault') load(type); })
               .catch(function (error) { indicator.textContent = error.message; })
               .then(function () { control.disabled = false; });
           });
         }
         var defaultIndicator = document.createElement('span'); defaultIndicator.setAttribute('aria-live', 'polite'); label.appendChild(defaultIndicator);
         save(defaultSelect, 'saveDefault', null, defaultIndicator, null);
+
+        var add = document.createElement('div'); add.className = 'form-inline'; add.style.margin = '10px 0';
+        var addText = document.createElement('input'); addText.type = 'text'; addText.className = 'form-control'; addText.style.minWidth = '260px';
+        addText.placeholder = type === 'category' ? 'Feed category, e.g. Sports > Sails' : 'Feed brand name';
+        addText.setAttribute('aria-label', type === 'category' ? 'Feed category path to add' : 'Feed brand name to add');
+        var addSelect = select(data.options, null, 'Auto-create');
+        addSelect.setAttribute('aria-label', 'Destination for the new row');
+        var addButton = document.createElement('button'); addButton.type = 'button'; addButton.className = 'btn btn-default'; addButton.textContent = 'Add row';
+        var addIndicator = document.createElement('span'); addIndicator.setAttribute('aria-live', 'polite');
+        addText.addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); addButton.click(); } });
+        addButton.addEventListener('click', function () {
+          addButton.disabled = true; addIndicator.textContent = 'Adding…';
+          post('addMapping', type, {label: addText.value, value: addSelect.value})
+            .then(function () { load(type, 'Added.'); })
+            .catch(function (error) { addIndicator.textContent = error.message; })
+            .then(function () { addButton.disabled = false; });
+        });
+        [addText, addSelect, addButton, addIndicator].forEach(function (element) { add.appendChild(element); add.appendChild(document.createTextNode(' ')); });
+        state.pane.appendChild(add);
+        if (notice) { addIndicator.textContent = notice; setTimeout(function () { if (addIndicator.textContent === notice) addIndicator.textContent = ''; }, 3000); }
+
         if (!data.rows.length) {
           var empty = document.createElement('p');
-          empty.textContent = 'Nothing discovered yet. Map ' + (type === 'category' ? 'category_paths' : 'manufacturer') + ' on the Product fields tab, save, then click Refresh from source.';
+          empty.textContent = 'No rows yet. Add one above, or load the feed (set the ' + (type === 'category' ? 'category_paths' : 'manufacturer') + ' mapping on the Product fields tab and save).';
           state.pane.appendChild(empty); return;
         }
         var table = document.createElement('table'); table.className = 'table';
         var header = table.createTHead().insertRow();
-        ['Source label', 'Current status', 'Override'].forEach(function (title) { var cell = document.createElement('th'); cell.textContent = title; header.appendChild(cell); });
+        ['Feed value', 'In feed', 'Current status', 'Destination', ''].forEach(function (title) { var cell = document.createElement('th'); cell.textContent = title; header.appendChild(cell); });
         var body = table.createTBody();
         data.rows.forEach(function (row) {
           var tr = body.insertRow(); tr.insertCell().textContent = row.label;
+          var badge = document.createElement('span');
+          badge.className = 'label ' + (row.seen ? 'label-success' : 'label-warning');
+          badge.textContent = row.seen ? 'seen in feed ' + row.seen : 'not seen yet';
+          tr.insertCell().appendChild(badge);
           var status = tr.insertCell(); status.textContent = row.status;
           var cell = tr.insertCell();
           var control = select(data.options, row.id, 'Use default (auto-create if none)');
-          control.setAttribute('aria-label', 'Override for ' + row.label);
+          control.setAttribute('aria-label', 'Destination for ' + row.label);
           cell.appendChild(control);
           var indicator = document.createElement('span'); indicator.setAttribute('aria-live', 'polite'); cell.appendChild(indicator);
           save(control, 'saveMapping', row.key, indicator, status);
+          var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm'; remove.textContent = 'Delete';
+          remove.setAttribute('aria-label', 'Delete row ' + row.label);
+          remove.addEventListener('click', function () {
+            if (!window.confirm('Delete the row for "' + row.label + '"? If the feed still contains it, it reappears as auto-create the next time the feed is read.')) return;
+            remove.disabled = true;
+            post('deleteMapping', type, {key: row.key})
+              .then(function () { load(type); })
+              .catch(function (error) { indicator.textContent = error.message; remove.disabled = false; });
+          });
+          tr.insertCell().appendChild(remove);
         });
         state.pane.appendChild(table);
-      }).catch(function (error) { state.pane.textContent = error.message; }).then(function () { state.loading = false; });
+      }).catch(function (error) { if (token === state.token) state.pane.textContent = error.message; });
     }
     ['category', 'brand'].forEach(function (type) {
       var pane = document.getElementById(type === 'category' ? 'pi-category-mappings' : 'pi-brands');
-      states[type] = {pane: pane, loaded: false, loading: false};
+      states[type] = {pane: pane, loaded: false, token: 0};
       if (!id) pane.textContent = 'Save the source first.';
     });
     document.addEventListener('pi-source-tab', function (event) {
       var type = event.detail === 'pi-categories' ? 'category' : event.detail === 'pi-brands' ? 'brand' : null;
       if (type && !states[type].loaded) load(type);
     });
-    document.addEventListener('pi-test-source-complete', function () {
+    document.addEventListener('pi-feed-discovered', function () {
       ['category', 'brand'].forEach(function (type) { load(type); });
     });
     var active = document.querySelector('#pi-source-tabs > .tab-content > .tab-pane.active');

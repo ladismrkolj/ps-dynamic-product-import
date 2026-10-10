@@ -103,21 +103,6 @@
     return name + '  · ' + (isListColumn(col.parts) ? 'list · ' : '') + col.present + '/' + col.total + ' products';
   }
   function selectable(col) { return col.kind !== 'object' && col.kind !== 'list_of_objects'; }
-  function section(container, title, values) {
-    var heading = document.createElement('h4');
-    heading.textContent = title;
-    container.appendChild(heading);
-    var table = document.createElement('table');
-    table.className = 'table';
-    Object.keys(values || {}).forEach(function (key) {
-      var row = table.insertRow();
-      row.insertCell().textContent = key;
-      var pre = document.createElement('pre');
-      pre.textContent = JSON.stringify(values[key], null, 2);
-      row.insertCell().appendChild(pre);
-    });
-    container.appendChild(table);
-  }
 
   function init() {
     var panel = document.getElementById('pi-preview');
@@ -146,12 +131,14 @@
     var vlist = {mode: 'none', id: '', expr: ''}; // mode: none | col | custom
     var loadSeq = 0;
 
+    var LOCATION_FIELDS = ['location', 'source_format', 'xml_item_path'];
+    var NO_SOURCE = 'Enter a source (URL or server file path) to load the feed.';
     function feedBody(action, refresh) {
       var body = new URLSearchParams();
       body.set('ajax', '1');
       body.set('action', action);
       if (Number(panel.dataset.source) > 0) body.set('id_source', panel.dataset.source);
-      ['json_url', 'json_file_path', 'source_format', 'xml_item_path'].forEach(function (name) {
+      LOCATION_FIELDS.forEach(function (name) {
         body.set(name, form.querySelector('[name="' + name + '"]').value);
       });
       if (refresh) body.set('refresh', '1');
@@ -161,7 +148,7 @@
       return fetch(panel.dataset.url, {method: 'POST', credentials: 'same-origin', body: body}).then(function (response) { return response.json(); });
     }
     function hasLocation() {
-      return form.querySelector('[name="json_url"]').value.trim() !== '' || form.querySelector('[name="json_file_path"]').value.trim() !== '';
+      return form.querySelector('[name="location"]').value.trim() !== '';
     }
     function addSampler(cell, textarea) {
       var controls = document.createElement('div');
@@ -589,7 +576,7 @@
         tr.insertCell().appendChild(samples);
       });
       emptyMessage.style.display = shown ? 'none' : '';
-      emptyMessage.textContent = schema.columns.length ? 'No feed fields match the search.' : 'No feed fields yet. The feed loads once a URL or file path is set.';
+      emptyMessage.textContent = schema.columns.length ? 'No feed fields match the search.' : 'No feed fields yet. The feed loads once a source is set.';
     }
     function renderVariantsList() {
       variantsList.replaceChildren(new Option('— no variants —', ''));
@@ -599,19 +586,74 @@
       variantsCustom.style.display = vlist.mode === 'custom' ? '' : 'none';
       variantMappings.style.display = vlist.mode === 'none' ? 'none' : '';
     }
+    var PREFERRED_IDENTIFIERS = ['id', 'product_id', 'sku', 'reference', 'ean', 'code'];
+    var identifierSuggested = '';
+    var identifierNote = document.createElement('p');
+    identifierNote.className = 'help-block pi-identifier-note';
+    var identifierWarning = document.createElement('p');
+    identifierWarning.className = 'alert alert-warning pi-identifier-warning';
+    identifierWarning.setAttribute('role', 'status');
+    identifierWarning.style.display = 'none';
+    identifier.parentNode.insertBefore(identifierNote, identifier.nextSibling);
+    identifier.parentNode.insertBefore(identifierWarning, identifierNote.nextSibling);
+    function identifierStats(col) {
+      var missing = col.total - col.present;
+      var duplicates = col.present - col.distinct;
+      return {missing: missing, duplicates: duplicates, perfect: missing === 0 && duplicates === 0};
+    }
+    function identifierLabel(col, suggested) {
+      var stats = identifierStats(col);
+      var issues = [];
+      if (stats.missing > 0) issues.push('missing in ' + stats.missing);
+      if (stats.duplicates > 0) issues.push(stats.duplicates + (stats.duplicates === 1 ? ' duplicate' : ' duplicates'));
+      return col.key + ' · ' + col.present + '/' + col.total + ' · ' + (issues.length ? issues.join(', ') : 'unique ✓') + (suggested ? ' · suggested' : '');
+    }
+    function suggestIdentifier(choices) {
+      var perfect = choices.filter(function (col) { return identifierStats(col).perfect; });
+      for (var i = 0; i < PREFERRED_IDENTIFIERS.length; i++) {
+        var named = perfect.filter(function (col) { return col.key.toLowerCase() === PREFERRED_IDENTIFIERS[i]; })[0];
+        if (named) return String(named.parts[0]);
+      }
+      return perfect.length ? String(perfect[0].parts[0]) : '';
+    }
+    function updateIdentifierWarning() {
+      var value = identifierPicker.value === '__other__' ? identifier.value.trim() : identifierPicker.value;
+      var message = '';
+      if (value !== '' && schema.columns.length) {
+        var col = schema.columns.filter(function (item) { return item.parts.length === 1 && String(item.parts[0]) === value; })[0];
+        if (!col) message = '"' + value + '" is not a top-level field of the loaded feed, so products without it are skipped.';
+        else if (col.kind === 'scalar') {
+          var stats = identifierStats(col);
+          if (stats.duplicates > 0) message += '"' + value + '" is not unique: ' + stats.duplicates + (stats.duplicates === 1 ? ' product repeats a value' : ' products repeat values') + ' used by another product, so they overwrite each other and only one of each group is kept. ';
+          if (stats.missing > 0) message += '"' + value + '" is missing on ' + stats.missing + (stats.missing === 1 ? ' product; that product is skipped.' : ' products; those products are skipped.');
+        }
+      }
+      identifierWarning.textContent = message.trim();
+      identifierWarning.style.display = message ? '' : 'none';
+      identifierNote.textContent = identifierSuggested !== '' && !identifierTouched && identifier.value === identifierSuggested ?
+        'Suggested from the feed: it is unique and present on every product. Change it if another field identifies your products.' : '';
+    }
     function renderIdentifier() {
       var choices = schema.columns.filter(function (col) { return col.parts.length === 1 && col.kind === 'scalar'; });
-      choices = choices.filter(function (col) { return col.present === col.total; })
-        .concat(choices.filter(function (col) { return col.present !== col.total; }));
+      var rank = function (col) { var stats = identifierStats(col); return stats.perfect ? 0 : (stats.missing === 0 ? 1 : 2); };
+      choices = choices.map(function (col, index) { return {col: col, index: index}; })
+        .sort(function (a, b) { return rank(a.col) - rank(b.col) || a.index - b.index; })
+        .map(function (entry) { return entry.col; });
+      if (!identifierTouched && (identifier.value === '' || identifier.value === identifierSuggested)) {
+        identifierSuggested = suggestIdentifier(choices);
+        identifier.value = identifierSuggested;
+      }
       identifierPicker.replaceChildren(new Option('— choose —', ''));
       choices.forEach(function (col) {
-        identifierPicker.add(new Option(col.key + ' (' + percent(col.present, col.total) + '% of products)', String(col.parts[0])));
+        var key = String(col.parts[0]);
+        identifierPicker.add(new Option(identifierLabel(col, key === identifierSuggested && identifier.value === identifierSuggested && !identifierTouched), key));
       });
       identifierPicker.add(new Option('Other key…', '__other__'));
       var selected = identifierTouched ? identifierChoice : identifier.value;
       identifierPicker.value = selected === '' ? '' :
         Array.prototype.some.call(identifierPicker.options, function (option) { return option.value === selected; }) ? selected : '__other__';
       identifier.style.display = identifierPicker.value === '__other__' ? '' : 'none';
+      updateIdentifierWarning();
     }
     identifierPicker.addEventListener('change', function () {
       identifierTouched = true;
@@ -619,8 +661,9 @@
       if (this.value !== '__other__') identifier.value = this.value;
       identifier.style.display = this.value === '__other__' ? '' : 'none';
       if (this.value === '__other__') identifier.focus();
+      renderIdentifier();
     });
-    identifier.addEventListener('input', function () { identifierTouched = true; identifierChoice = '__other__'; });
+    identifier.addEventListener('input', function () { identifierTouched = true; identifierChoice = '__other__'; updateIdentifierWarning(); });
     function renderAll() {
       renderReference();
       renderVariantsList();
@@ -645,12 +688,31 @@
     searchInput.addEventListener('keydown', function (event) { if (event.key === 'Enter') event.preventDefault(); });
 
     // ---- Feed loading ----
+    function discoverySummary(discovery) {
+      if (!discovery) return 'save the source to record its categories and brands';
+      var parts = [];
+      var found = [];
+      var created = 0;
+      [['categories', 'unique_paths', 'category', 'categories'], ['brands', 'unique_brands', 'brand', 'brands']].forEach(function (entry) {
+        var result = discovery[entry[0]] || {};
+        if (result.error) { parts.push(entry[0] + ': ' + result.error); return; }
+        if (result.skipped) return;
+        var count = result[entry[1]];
+        found.push(count + ' ' + (count === 1 ? entry[2] : entry[3]));
+        created += result.new || 0;
+        if (result.failed_items) parts.push(result.failed_items + ' ' + (result.failed_items === 1 ? 'item' : 'items') + ' failed ' + entry[0] + ' evaluation (e.g. ' + (result.errors[0] || '') + ')');
+      });
+      if (found.length) parts.unshift(found.join(', ') + ' found (' + created + ' new)');
+      return parts.join(' · ');
+    }
     function applySchema(data) {
       reconcile(data.schema);
       renderAll();
-      statusLine.textContent = data.item_count + ' products, ' + schema.columns.length + ' fields, ' +
+      statusLine.textContent = data.item_count + ' products, ' + schema.columns.length + ' fields' +
+        (discoverySummary(data.discovery) ? ' · ' + discoverySummary(data.discovery) : '') + ' · ' +
         (data.cache.cached ? 'cached ' + age(data.cache.age) : 'fetched just now') +
         (schema.truncated ? ' (field list capped at depth 6 / 1000 fields)' : '');
+      if (data.discovery) document.dispatchEvent(new Event('pi-feed-discovered'));
     }
     function loadFeed(refresh) {
       var button = document.getElementById('pi-refresh-feed');
@@ -667,7 +729,7 @@
     }
     document.getElementById('pi-refresh-feed').addEventListener('click', function () {
       if (hasLocation()) loadFeed(true);
-      else statusLine.textContent = 'Enter a feed URL or file path to load the feed.';
+      else statusLine.textContent = NO_SOURCE;
     });
 
     // ---- Submission: reproduce the original POST fields exactly ----
@@ -691,48 +753,6 @@
       });
     });
 
-    // ---- Test source (General tab) ----
-    var test = panel.querySelector('.pi-test-source');
-    function discovery(container, title, data) { section(container, title, data); }
-    test.addEventListener('click', function () {
-      var output = panel.querySelector('.pi-source-results');
-      test.disabled = true;
-      output.textContent = 'Testing…';
-      post(feedBody('testSource', false)).then(function (data) {
-        output.textContent = '';
-        if (data.error) {
-          output.textContent = data.error;
-          return;
-        }
-        var categories = data.categories || {};
-        var brands = data.brands || {};
-        var count = function (value, singular, plural) { return value + ' ' + (value === 1 ? singular : plural); };
-        var result = function (sectionData, key, singular, plural) {
-          if (sectionData.error) return sectionData.error;
-          if (sectionData.skipped) return sectionData.skipped;
-          return count(sectionData[key], singular, plural);
-        };
-        var status = document.createElement('p');
-        status.textContent = 'OK - ' + [
-          count(data.item_count, 'item', 'items'),
-          count(data.schema.columns.length, 'field', 'fields'),
-          (categories.skipped || categories.error ? 'categories: ' : '') + result(categories, 'unique_paths', 'category path', 'category paths'),
-          (brands.skipped || brands.error ? 'brands: ' : '') + result(brands, 'unique_brands', 'brand', 'brands')
-        ].join(', ');
-        output.appendChild(status);
-        var details = document.createElement('details');
-        var summary = document.createElement('summary');
-        summary.textContent = 'Details';
-        details.appendChild(summary);
-        section(details, 'Source status', {connectivity: data.connectivity, item_count: data.item_count});
-        discovery(details, 'Category discovery', categories);
-        discovery(details, 'Brand discovery', brands);
-        output.appendChild(details);
-        applySchema(data);
-      })
-        .catch(function (error) { output.textContent = 'Test failed: ' + error.message; })
-        .then(function () { test.disabled = false; document.dispatchEvent(new Event('pi-test-source-complete')); });
-    });
 
     // ---- Preview table ----
     var previewButton = form.querySelector('.pi-preview-table-button');
@@ -900,16 +920,16 @@
     loadEditors({mapping: saved.mapping || [], fields: saved.fields || [], attributes: saved.attributes || []});
     renderAll();
     if (hasLocation()) loadFeed(false);
-    else statusLine.textContent = 'Enter a feed URL or file path to load the feed.';
+    else statusLine.textContent = NO_SOURCE;
     var reloadTimer = null;
-    ['json_url', 'json_file_path', 'source_format', 'xml_item_path'].forEach(function (name) {
+    LOCATION_FIELDS.forEach(function (name) {
       var field = form.querySelector('[name="' + name + '"]');
       ['input', 'change'].forEach(function (eventName) {
         field.addEventListener(eventName, function () {
           clearTimeout(reloadTimer);
           reloadTimer = setTimeout(function () {
             if (hasLocation()) loadFeed(false);
-            else statusLine.textContent = 'Enter a feed URL or file path to load the feed.';
+            else statusLine.textContent = NO_SOURCE;
           }, 700);
         });
       });

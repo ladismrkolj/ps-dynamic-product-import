@@ -1,6 +1,6 @@
 <div id="pi-import-source" class="panel" data-url="{$pi_import_url|escape:'html':'UTF-8'}">
   <h3>Import source configuration</h3>
-  <p class="help-block">Upload a <code>.productimport.yml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, suppliers and the language are matched by name; unmatched names are listed below.</p>
+  <p class="help-block">Upload a <code>.productimport.yaml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, suppliers and the language are matched by name; unmatched names are listed below. Mappings are written as <code>feed value: PrestaShop value</code>; you can also list feed categories or brands the feed has not shown yet, and they are mapped as soon as they appear.</p>
   <div class="form-group">
     <label>What to do with the file</label>
     {if $pi_import_can_create}
@@ -14,13 +14,13 @@
         <option value="{$pi_source.id_source|intval}">{$pi_source.name|escape:'html':'UTF-8'} ({$pi_source.technical_key|escape:'html':'UTF-8'})</option>
         {/foreach}
       </select>
-      <p class="help-block">Entries in the file overwrite the source; settings and category or brand mappings missing from the file are kept unchanged. The technical key is never changed. An entry with <code>category: null</code> or <code>brand: null</code> resets that mapping to auto-create.</p>
+      <p class="help-block">Entries in the file overwrite the source; settings and category or brand mappings missing from the file are kept unchanged. The technical key is never changed. A mapping written as <code>Feed value: ~</code> resets that entry to auto-create. If the PrestaShop destination does not exist, the entry is left unchanged and listed as a warning.</p>
     </div>
     {/if}
   </div>
   <div class="form-group">
     <label for="pi-import-file">Export file</label>
-    <input type="file" id="pi-import-file" accept=".yml,.yaml,text/yaml">
+    <input type="file" id="pi-import-file" accept=".yaml,.yml,text/yaml">
   </div>
   <div class="form-group">
     <label for="pi-import-text">&hellip; or paste the exported YAML</label>
@@ -65,7 +65,7 @@
     var mode = target();
     result.textContent = '';
     if (!file && pasted.trim() === '') {
-      result.appendChild(alertBox('danger', 'Choose a .productimport.yml file or paste its content.'));
+      result.appendChild(alertBox('danger', 'Choose a .productimport.yaml file or paste its content.'));
       return;
     }
     if (mode === 'overwrite') {
@@ -78,9 +78,15 @@
     if (mode === 'overwrite') { body.append('id_source', document.getElementById('pi-import-id').value); }
     if (file) { body.append('source_file', file); } else { body.append('source_text', pasted); }
     button.disabled = true;
+    result.appendChild(alertBox('info', 'Importing\u2026'));
     fetch(panel.getAttribute('data-url'), {method: 'POST', body: body, credentials: 'same-origin'})
-      .then(function (response) { return response.json(); })
+      .then(function (response) {
+        return response.text().then(function (text) {
+          try { return JSON.parse(text); } catch (e) { throw new Error('unexpected server response (HTTP ' + response.status + '): ' + text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)); }
+        });
+      })
       .then(function (data) {
+        result.textContent = '';
         if (data.error) { result.appendChild(alertBox('danger', data.error)); return; }
         var ok = document.createElement('div');
         ok.className = 'alert alert-success';
@@ -112,7 +118,7 @@
           result.appendChild(warn);
         }
       })
-      .catch(function (error) { result.appendChild(alertBox('danger', 'Import failed: ' + error.message)); })
+      .catch(function (error) { result.textContent = ''; result.appendChild(alertBox('danger', 'Import failed: ' + error.message)); })
       .then(function () { button.disabled = false; });
   });
 }());

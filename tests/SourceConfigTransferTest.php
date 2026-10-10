@@ -12,7 +12,7 @@ class SourceConfigTransferTest extends TestCase
     private static function source(array $override = []): array
     {
         return $override + [
-            'name' => 'Šport shop', 'technical_key' => 'sport_shop', 'json_url' => 'https://example.com/feed.json', 'json_file_path' => null,
+            'name' => 'Šport shop', 'technical_key' => 'sport_shop', 'location' => 'https://example.com/feed.json',
             'source_format' => 'json', 'xml_item_path' => null, 'identifier_field' => 'id', 'filter_expression' => 'fields.stock > 0',
             'field_mapping' => '{"name":"fields.title","price":"fields.price"}',
             'variant_mapping' => '{"variants_expression":"fields.variants","attributes":[{"name":"Size","expression":"variant.size"}],"fields":{"reference":"variant.sku"}}',
@@ -80,14 +80,16 @@ class SourceConfigTransferTest extends TestCase
     {
         $json = self::export();
         self::assertStringContainsString('# Product Import source configuration', $json);
-        self::assertMatchesRegularExpression("/^  - feed: '?Water > Boards'?$/m", $json);
+        self::assertMatchesRegularExpression("/^  '?Water > Boards'?: '?Home > Sport > Boards'?$/m", $json);
         self::assertStringNotContainsString('token', strtolower($json));
         $decoded = Yaml::parse($json);
         self::assertSame('productimport-source', $decoded['format']);
         self::assertSame(1, $decoded['version']);
         self::assertSame('Home > Sport > Boards', $decoded['source']['default_category']);
-        self::assertSame(['feed' => 'Water > Boards', 'category' => 'Home > Sport > Boards'], $decoded['category_mappings'][0]);
-        self::assertSame(['feed' => 'Duotone', 'brand' => 'Duotone'], $decoded['brand_mappings'][0]);
+        self::assertSame(['Water > Boards' => 'Home > Sport > Boards', 'Misc' => null], $decoded['category_mappings']);
+        self::assertSame(['Duotone' => 'Duotone', 'Other' => null], $decoded['brand_mappings']);
+        self::assertSame('https://example.com/feed.json', $decoded['source']['location']);
+        self::assertArrayNotHasKey('json_url', $decoded['source']);
         self::assertSame(['name' => 'fields.title', 'price' => 'fields.price'], $decoded['source']['field_mapping']);
         self::assertSame('sl', $decoded['source']['language']);
         self::assertSame('Acme', $decoded['source']['supplier']);
@@ -162,13 +164,21 @@ class SourceConfigTransferTest extends TestCase
                 return $d;
             }, 'technical_key'],
             'no location' => [static function (array $d) {
-                $d['source']['json_url'] = null;
+                $d['source']['location'] = null;
                 return $d;
-            }, 'JSON URL or file path'],
+            }, 'Provide a source'],
             'ftp url' => [static function (array $d) {
-                $d['source']['json_url'] = 'ftp://example.com/x';
+                $d['source']['location'] = 'ftp://example.com/x';
                 return $d;
             }, 'HTTP or HTTPS'],
+            'file scheme' => [static function (array $d) {
+                $d['source']['location'] = 'file:///etc/passwd';
+                return $d;
+            }, '"file:" locations are not supported'],
+            'php wrapper' => [static function (array $d) {
+                $d['source']['location'] = 'php://filter/resource=x';
+                return $d;
+            }, '"php:" locations are not supported'],
             'format' => [static function (array $d) {
                 $d['source']['source_format'] = 'csv';
                 return $d;
@@ -201,14 +211,22 @@ class SourceConfigTransferTest extends TestCase
                 $d['source']['root_category'] = 5;
                 return $d;
             }, 'source.root_category'],
-            'category mapping without path' => [static function (array $d) {
-                $d['category_mappings'][0]['feed'] = null;
+            'category mapping with empty segment' => [static function (array $d) {
+                $d['category_mappings'] = ['A >  > B' => null];
                 return $d;
-            }, 'category mapping needs a "feed"'],
-            'brand mapping name' => [static function (array $d) {
-                $d['brand_mappings'][0]['feed'] = '';
+            }, 'non-empty names'],
+            'brand destination type' => [static function (array $d) {
+                $d['brand_mappings'] = ['x' => 5];
                 return $d;
-            }, '"feed" brand name'],
+            }, 'destination of "x"'],
+            'category mappings as list' => [static function (array $d) {
+                $d['category_mappings'] = [['feed' => 'a', 'category' => 'b']];
+                return $d;
+            }, 'must be a map'],
+            'destination as list' => [static function (array $d) {
+                $d['category_mappings'] = ['A' => ['Home', 'Sport']];
+                return $d;
+            }, 'category path like'],
         ];
     }
 
@@ -284,8 +302,8 @@ class SourceConfigTransferTest extends TestCase
         self::assertNull($source['default_id_category']);
         self::assertNull($source['default_id_manufacturer']);
         self::assertNull($source['id_supplier']);
-        self::assertNull($result['category_mappings'][0]['id_category']);
-        self::assertNull($result['brand_mappings'][0]['id_manufacturer']);
+        self::assertSame([['source_path' => ['Misc'], 'id_category' => null]], $result['category_mappings'], 'entry with a missing destination is not created');
+        self::assertSame([['source_name' => 'Other', 'id_manufacturer' => null]], $result['brand_mappings']);
         $text = implode("\n", $result['warnings']);
         foreach (['Language "sl"', 'Root category "Home > Sport"', 'Default category', 'Default brand "Fanatic"', 'Supplier "Acme"', 'Brand mapping for "Duotone"', 'Category mapping for "Water > Boards"'] as $expected) {
             self::assertStringContainsString($expected, $text);
@@ -317,7 +335,7 @@ class SourceConfigTransferTest extends TestCase
 
     private static function existing(): array
     {
-        return ['id_source' => '3', 'technical_key' => 'other_key', 'name' => 'Local name', 'json_url' => 'https://local.example/feed.json', 'json_file_path' => null,
+        return ['id_source' => '3', 'technical_key' => 'other_key', 'name' => 'Local name', 'location' => 'https://local.example/feed.json',
             'source_format' => 'json', 'xml_item_path' => null, 'identifier_field' => 'sku', 'filter_expression' => 'fields.x', 'field_mapping' => '{"name":"fields.n"}',
             'variant_mapping' => null, 'active' => '1', 'deactivate_missing' => '1', 'id_lang_default' => '1', 'root_category_id' => '2', 'default_id_category' => '2',
             'default_id_manufacturer' => '9', 'id_supplier' => null];
@@ -326,12 +344,12 @@ class SourceConfigTransferTest extends TestCase
     public function testYamlRoundTripEqualsTheModel(): void
     {
         $source = self::source(['filter_expression' => "fields.stock > 0\n  and fields.price > 1", 'identifier_field' => '123']);
-        $categories = [['source_path' => '[" Sails ","A > B"]', 'id_category' => '6'], ['source_path' => '["Misc"]', 'id_category' => null]];
+        $categories = [['source_path' => '["Sails","B"]', 'id_category' => '6'], ['source_path' => '["Misc"]', 'id_category' => null]];
         $document = (new SourceConfigTransfer())->build($source, $categories, [['source_name' => 'Duotone', 'id_manufacturer' => '9']], self::lookups(), '0.15.0', '2026-01-02T03:04:05+00:00');
         $yaml = SourceConfigTransfer::encode($document);
         self::assertSame($document, Yaml::parse($yaml));
         $parsed = (new SourceConfigTransfer())->parse($yaml);
-        self::assertSame([' Sails ', 'A > B'], $parsed['category_mappings'][0]['source_path']);
+        self::assertSame(['Sails', 'B'], $parsed['category_mappings'][0]['source_path']);
         self::assertSame(['Home', 'Sport', 'Boards'], $parsed['category_mappings'][0]['category']);
         self::assertNull($parsed['category_mappings'][1]['category']);
         self::assertSame('123', $parsed['source']['identifier_field']);
@@ -352,8 +370,8 @@ class SourceConfigTransferTest extends TestCase
     public function testOverwriteUpsertsListedEntriesAndKeepsTheRest(): void
     {
         $yaml = "format: productimport-source\nversion: 1\nsource:\n  name: New name\n  technical_key: renamed\n  default_manufacturer: ~\n  default_category: Home > Sport\n"
-            . "category_mappings:\n  - feed: Water > Boards\n    category: Home > Sport > Boards\n  - feed: Misc\n    category: ~\n  - feed: Gone\n    category: Nope > Nothing\n"
-            . "brand_mappings:\n  - feed: Duotone\n    brand: Duotone\n  - feed: Other\n    brand: ~\n";
+            . "category_mappings:\n  Water > Boards: Home > Sport > Boards\n  Misc: ~\n  Gone: Nope > Nothing\n"
+            . "brand_mappings:\n  Duotone: Duotone\n  Other: ~\n";
         $transfer = new SourceConfigTransfer();
         $result = $transfer->resolveOverwrite($transfer->parse($yaml, true), self::existing(), self::importLookups());
 
@@ -390,5 +408,94 @@ class SourceConfigTransferTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('Unsupported export version 2');
         (new SourceConfigTransfer())->parse("format: productimport-source\nversion: 2\nsource: {}\n", true);
+    }
+
+    public function testMappingMapsRoundTripAndTildeResetsToAutoCreate(): void
+    {
+        $yaml = self::export();
+        $parsed = (new SourceConfigTransfer())->parse($yaml);
+        self::assertSame([['source_path' => ['Water', 'Boards'], 'category' => ['Home', 'Sport', 'Boards']], ['source_path' => ['Misc'], 'category' => null]], $parsed['category_mappings']);
+        self::assertSame([['source_name' => 'Duotone', 'manufacturer' => 'Duotone'], ['source_name' => 'Other', 'manufacturer' => null]], $parsed['brand_mappings']);
+
+        $tilde = (new SourceConfigTransfer())->parse("format: productimport-source\nversion: 1\nsource: {}\ncategory_mappings:\n  Demo Fins: ~\nbrand_mappings:\n  Demo: ~\n", true);
+        self::assertSame([['source_path' => ['Demo Fins'], 'category' => null]], $tilde['category_mappings']);
+        self::assertNull($tilde['brand_mappings'][0]['manufacturer']);
+    }
+
+    public function testUnlistedFeedValuesAreCreatedAsPreMappedEntries(): void
+    {
+        $yaml = "format: productimport-source\nversion: 1\ncategory_mappings:\n  Windsurf > Sails: Home > Sport\n  Demo Fins: ~\nbrand_mappings:\n  Demo Watersports: Duotone\n";
+        $transfer = new SourceConfigTransfer();
+        $result = $transfer->resolveOverwrite($transfer->parse($yaml, true), self::existing(), self::importLookups());
+        self::assertSame([], $result['warnings']);
+        self::assertSame([['source_path' => ['Windsurf', 'Sails'], 'id_category' => 5], ['source_path' => ['Demo Fins'], 'id_category' => null]], $result['category_mappings']);
+        self::assertSame([['source_name' => 'Demo Watersports', 'id_manufacturer' => 9]], $result['brand_mappings']);
+    }
+
+    public function testMissingDestinationWarnsAndSkipsTheEntry(): void
+    {
+        $yaml = "format: productimport-source\nversion: 1\ncategory_mappings:\n  Feed Cat: Home > Nowhere\nbrand_mappings:\n  Feed Brand: No Such Brand\n";
+        $transfer = new SourceConfigTransfer();
+        $result = $transfer->resolveOverwrite($transfer->parse($yaml, true), self::existing(), self::importLookups());
+        self::assertSame([], $result['category_mappings']);
+        self::assertSame([], $result['brand_mappings']);
+        self::assertCount(2, $result['warnings']);
+        self::assertStringContainsString('Category mapping for "Feed Cat"', $result['warnings'][0]);
+        self::assertStringContainsString('left unchanged', $result['warnings'][0]);
+        self::assertStringContainsString('Brand mapping for "Feed Brand"', $result['warnings'][1]);
+        self::assertStringContainsString('left unchanged', $result['warnings'][1]);
+    }
+
+    public function testDuplicateKeysAreSurfaced(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('a key appears twice');
+        (new SourceConfigTransfer())->parse("format: productimport-source\nversion: 1\nbrand_mappings:\n  Duotone: A\n  Duotone: B\n", true);
+    }
+
+    public function testCategoryNameContainingTheSeparatorCannotBeExported(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('cannot be written in the YAML mappings');
+        (new SourceConfigTransfer())->build(self::source(), [['source_path' => '["A > B"]', 'id_category' => null]], [], self::lookups(), '0.15.0', 'now');
+    }
+
+    public function testDestinationCategoryWithSeparatorInsideANameCannotBeExported(): void
+    {
+        $lookups = self::lookups();
+        $lookups['category_path'] = static function () {
+            return ['Home', 'A > B'];
+        };
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('cannot be written in the YAML mappings');
+        (new SourceConfigTransfer())->build(self::source(), [['source_path' => '["X"]', 'id_category' => '6']], [], $lookups, '0.15.0', 'now');
+    }
+
+    public function testLocationInYamlForUrlAndFilePathAndOverwrite(): void
+    {
+        $transfer = new SourceConfigTransfer();
+        $parsed = $transfer->parse(self::export());
+        self::assertSame('https://example.com/feed.json', $parsed['source']['location']);
+        $document = Yaml::parse(self::export());
+        $document['source']['location'] = 'feeds/shop.json';
+        $parsed = $transfer->parse(json_encode($document));
+        self::assertSame('feeds/shop.json', $parsed['source']['location']);
+        $result = $transfer->resolveOverwrite($transfer->parse("format: productimport-source\nversion: 1\nsource:\n  location: /srv/feeds/new.json\n", true), self::existing(), self::importLookups());
+        self::assertSame(['location' => '/srv/feeds/new.json'], $result['source']);
+    }
+
+    public function testCreateNewKeepsEverySourceSetting(): void
+    {
+        $yaml = "format: productimport-source\nversion: 1\nsource:\n  name: Xml shop\n  technical_key: xml_shop\n  language: sl\n  active: false\n  deactivate_missing: true\n"
+            . "  source_format: xml\n  location: products.xml\n  xml_item_path: products/product\n  identifier_field: sku\n  filter_expression: fields.a\n"
+            . "  root_category: Home > Sport\n  default_category: Home > Sport > Boards\n  default_manufacturer: Duotone\n  supplier: Acme\n"
+            . "  field_mapping:\n    name: fields.n\n";
+        $transfer = new SourceConfigTransfer();
+        $source = $transfer->resolve($transfer->parse($yaml), self::importLookups(), static function () {
+            return false;
+        })['source'];
+        self::assertSame(['xml', 'products.xml', 'products/product', 'sku', 'fields.a'], [$source['source_format'], $source['location'], $source['xml_item_path'], $source['identifier_field'], $source['filter_expression']]);
+        self::assertSame([2, 5, 6, 9, 8, 0, 1], [$source['id_lang_default'], $source['root_category_id'], $source['default_id_category'], $source['default_id_manufacturer'], $source['id_supplier'], $source['active'], $source['deactivate_missing']]);
+        self::assertSame('{"name":"fields.n"}', $source['field_mapping']);
     }
 }

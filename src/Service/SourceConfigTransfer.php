@@ -14,6 +14,9 @@ class SourceConfigTransfer
     public const VERSION = 1;
     public const MAX_BYTES = 1048576;
     public const IMPORTED_SUFFIX = ' (imported)';
+    /** Plain source columns copied verbatim from the file (new source and overwrite share these lists). technical_key is never overwritten. */
+    private const TEXT_SETTINGS = ['name', 'technical_key', 'location', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'field_mapping', 'variant_mapping'];
+    private const FLAG_SETTINGS = ['active', 'deactivate_missing'];
     private const MAX_WARNINGS = 100;
     private const MAX_MAPPINGS = 20000;
     private const MAX_DEPTH = 32;
@@ -30,19 +33,20 @@ class SourceConfigTransfer
             return $value === null || $value === '' ? null : $lookup((int) $value);
         };
         $path = static function (?array $segments) {
-            return $segments === null ? null : self::pathValue($segments);
+            return $segments === null ? null : self::pathKey($segments);
         };
+        // Maps "feed value: destination" (destination null = auto-create). Feed values are unique per source, so keys never collide.
         $categories = [];
         foreach ($categoryMappings as $row) {
             $feedPath = json_decode((string) $row['source_path'], true);
             if (!is_array($feedPath) || $feedPath === []) {
                 continue;
             }
-            $categories[] = ['feed' => self::pathValue(array_values($feedPath)), 'category' => $path($id($row['id_category'], $lookups['category_path']))];
+            $categories[self::pathKey(array_values($feedPath))] = $path($id($row['id_category'], $lookups['category_path']));
         }
         $brands = [];
         foreach ($brandMappings as $row) {
-            $brands[] = ['feed' => (string) $row['source_name'], 'brand' => $id($row['id_manufacturer'], $lookups['manufacturer_name'])];
+            $brands[(string) $row['source_name']] = $id($row['id_manufacturer'], $lookups['manufacturer_name']);
         }
 
         return [
@@ -57,8 +61,7 @@ class SourceConfigTransfer
                 'active' => (bool) $source['active'],
                 'deactivate_missing' => (bool) $source['deactivate_missing'],
                 'source_format' => (string) $source['source_format'],
-                'json_url' => $source['json_url'] ?? null,
-                'json_file_path' => $source['json_file_path'] ?? null,
+                'location' => $source['location'] ?? null,
                 'xml_item_path' => $source['xml_item_path'] ?? null,
                 'identifier_field' => (string) $source['identifier_field'],
                 'filter_expression' => $source['filter_expression'] ?? null,
@@ -82,14 +85,19 @@ class SourceConfigTransfer
             . "# or to overwrite an existing one. On overwrite, entries in this file replace the source's values and\n"
             . "# anything missing from the file is kept as it is. technical_key is never changed on overwrite.\n"
             . "#\n"
+            . "# location:           where the feed comes from: an http:// or https:// URL, or a file path inside the import folder\n"
+            . "#                     (relative paths are resolved inside it). source_format selects how the feed is read.\n"
             . "# field_mapping:      PrestaShop field: feed expression.\n"
-            . "# category_mappings:  feed: category path in the feed; category: PrestaShop category path below the shop root\n"
-            . "#                     (names joined with ' > ', matched exactly). null = create the category automatically.\n"
-            . "# brand_mappings:     feed: brand name in the feed; brand: PrestaShop brand name. null = create it automatically.\n"
-            . "# Mapping entries are matched by their feed value: listed entries are added or updated, others are kept.\n\n";
+            . "# category_mappings:  feed category path: PrestaShop category path below the shop root (names joined with ' > ',\n"
+            . "#                     matched exactly). ~ or null = create the category automatically. A name that itself\n"
+            . "#                     contains ' > ' cannot be written here.\n"
+            . "# brand_mappings:     feed brand name: PrestaShop brand name. ~ or null = create it automatically.\n"
+            . "# Mapping entries are matched by their feed value and each feed value may appear once. Listed entries are\n"
+            . "# added or updated, others are kept. An entry for a feed value not seen yet is stored and used once the feed\n"
+            . "# contains it. If the PrestaShop destination does not exist, the entry is skipped with a warning.\n\n";
         try {
             $yaml = Yaml::dump($document, 8, 2, Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK);
-            // Put the first key of a list item on the dash line ("- feed: x"); keep the original if that would change the data.
+            // Put the first key of a list item on the dash line ("- name: x"); keep the original if that would change the data.
             $compact = preg_replace('/^( *)-\n\1  (?=\S)/m', '$1- ', $yaml);
             if ($compact !== null && Yaml::parse($compact) === Yaml::parse($yaml)) {
                 $yaml = $compact;
@@ -122,7 +130,9 @@ class SourceConfigTransfer
         try {
             $document = Yaml::parse($text);
         } catch (ParseException $error) {
-            throw new \InvalidArgumentException('The file is not valid YAML: ' . $error->getMessage());
+            $message = $error->getMessage();
+            throw new \InvalidArgumentException('The file is not valid YAML: ' . (str_contains($message, 'Duplicate key')
+                ? 'a key appears twice in the same mapping (each feed category or brand may be listed once). ' : '') . $message);
         }
         if (!is_array($document) || ($document !== [] && array_is_list($document))) {
             throw new \InvalidArgumentException('The file must contain a YAML mapping with "format", "version" and "source".');
@@ -144,51 +154,42 @@ class SourceConfigTransfer
         $source = self::parseSource($in, $partial);
 
         $categories = [];
-        $seen = [];
-        $rows = $document['category_mappings'] ?? [];
-        if (!is_array($rows) || !array_is_list($rows) || count($rows) > self::MAX_MAPPINGS) {
-            throw new \InvalidArgumentException('"category_mappings" must be a list of at most ' . self::MAX_MAPPINGS . ' entries.');
-        }
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                throw new \InvalidArgumentException('Every category mapping must be a mapping with "feed" and "category".');
-            }
-            $path = self::optionalPath($row['feed'] ?? null, 'category_mappings[].feed');
-            if ($path === null) {
-                throw new \InvalidArgumentException('Every category mapping needs a "feed" category path.');
-            }
-            $hash = sha1(json_encode($path));
-            if (!isset($seen[$hash])) {
-                $seen[$hash] = true;
-                $categories[] = ['source_path' => $path, 'category' => self::optionalPath($row['category'] ?? null, 'category_mappings[].category')];
-            }
+        foreach (self::mappingEntries($document['category_mappings'] ?? null, 'category_mappings') as $feed => $destination) {
+            $feed = (string) $feed;
+            // Feed values are matched like discovery stores them: names trimmed.
+            $path = array_map('trim', self::optionalPath($feed, 'category_mappings: feed path "' . $feed . '"') ?? []);
+            $categories[] = ['source_path' => $path, 'category' => self::optionalPath($destination, 'category_mappings: destination of "' . $feed . '"')];
         }
         $brands = [];
-        $seen = [];
-        $rows = $document['brand_mappings'] ?? [];
-        if (!is_array($rows) || !array_is_list($rows) || count($rows) > self::MAX_MAPPINGS) {
-            throw new \InvalidArgumentException('"brand_mappings" must be a list of at most ' . self::MAX_MAPPINGS . ' entries.');
-        }
-        foreach ($rows as $row) {
-            if (!is_array($row)) {
-                throw new \InvalidArgumentException('Every brand mapping must be a mapping with "feed" and "brand".');
+        foreach (self::mappingEntries($document['brand_mappings'] ?? null, 'brand_mappings') as $name => $destination) {
+            $name = trim((string) $name);
+            if ($name === '' || mb_strlen($name) > 191) {
+                throw new \InvalidArgumentException('Every feed brand name in "brand_mappings" must have 1 to 191 characters.');
             }
-            $name = $row['feed'] ?? null;
-            if (!is_string($name) || $name === '' || mb_strlen($name) > 191) {
-                throw new \InvalidArgumentException('Every brand mapping needs a "feed" brand name of 1 to 191 characters.');
+            if ($destination !== null && (!is_string($destination) || $destination === '')) {
+                throw new \InvalidArgumentException('brand_mappings: the destination of "' . $name . '" must be a PrestaShop brand name or ~ (auto-create).');
             }
-            $manufacturer = self::optionalString($row, 'brand');
-            if (!isset($seen[$name])) {
-                $seen[$name] = true;
-                $brands[] = ['source_name' => $name, 'manufacturer' => $manufacturer];
-            }
+            $brands[] = ['source_name' => $name, 'manufacturer' => $destination];
         }
 
         return ['source' => $source, 'category_mappings' => $categories, 'brand_mappings' => $brands];
     }
 
+    /** @return array<array-key, mixed> the entries of a "feed value: destination" map */
+    private static function mappingEntries($rows, string $key): array
+    {
+        if ($rows === null) {
+            return [];
+        }
+        if (!is_array($rows) || ($rows !== [] && array_is_list($rows)) || count($rows) > self::MAX_MAPPINGS) {
+            throw new \InvalidArgumentException('"' . $key . '" must be a map of "feed value: destination" with at most ' . self::MAX_MAPPINGS . ' entries.');
+        }
+
+        return $rows;
+    }
+
     /**
-     * Resolves names to this store's IDs for a NEW source. Unmatched names stay unset and become warnings.
+     * Resolves names to this store's IDs for a NEW source. Unmatched settings stay unset and mapping entries with an unmatched destination are skipped; both become warnings.
      *
      * @param array $lookups language_id(string $iso):?int, default_language_id():int, root_category_id:int,
      *                       category_children(int $parent, int $idLang):array<int,string> (id => name),
@@ -201,13 +202,13 @@ class SourceConfigTransfer
     {
         $in = $document['source'];
         $warnings = [];
-        $data = [
-            'name' => $in['name'], 'technical_key' => $in['technical_key'], 'json_url' => $in['json_url'],
-            'json_file_path' => $in['json_file_path'], 'source_format' => $in['source_format'], 'xml_item_path' => $in['xml_item_path'],
-            'identifier_field' => $in['identifier_field'], 'filter_expression' => $in['filter_expression'],
-            'field_mapping' => $in['field_mapping'], 'variant_mapping' => $in['variant_mapping'],
-            'active' => $in['active'] ? 1 : 0, 'deactivate_missing' => $in['deactivate_missing'] ? 1 : 0,
-        ];
+        $data = [];
+        foreach (self::TEXT_SETTINGS as $key) {
+            $data[$key] = $in[$key];
+        }
+        foreach (self::FLAG_SETTINGS as $key) {
+            $data[$key] = $in[$key] ? 1 : 0;
+        }
         [$data['technical_key'], $changed] = self::uniqueKey($in['technical_key'], $keyTaken);
         if ($changed) {
             $data['name'] = mb_substr($in['name'], 0, 191 - mb_strlen(self::IMPORTED_SUFFIX)) . self::IMPORTED_SUFFIX;
@@ -226,16 +227,7 @@ class SourceConfigTransfer
         $data['default_id_manufacturer'] = self::namedId($in['default_manufacturer'], $lookups['manufacturers'], 'Default brand', $warnings);
         $data['id_supplier'] = self::namedId($in['supplier'], $lookups['suppliers'], 'Supplier', $warnings);
 
-        $categories = [];
-        foreach ($document['category_mappings'] as $row) {
-            $id = self::categoryId($row['category'], 'Category mapping for "' . self::joinPath($row['source_path']) . '": category', $lookups, $idLang, $warnings);
-            $categories[] = ['source_path' => $row['source_path'], 'id_category' => $id];
-        }
-        $brands = [];
-        foreach ($document['brand_mappings'] as $row) {
-            $brands[] = ['source_name' => $row['source_name'],
-                'id_manufacturer' => self::namedId($row['manufacturer'], $lookups['manufacturers'], 'Brand mapping for "' . $row['source_name'] . '": brand', $warnings)];
-        }
+        [$categories, $brands] = self::resolveMappings($document, $lookups, $idLang, $warnings);
 
         return ['source' => $data, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'warnings' => self::capWarnings($warnings)];
     }
@@ -259,12 +251,12 @@ class SourceConfigTransfer
         $in = $document['source'];
         $warnings = [];
         $changes = [];
-        foreach (['name', 'json_url', 'json_file_path', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'field_mapping', 'variant_mapping'] as $key) {
-            if (array_key_exists($key, $in)) {
+        foreach (self::TEXT_SETTINGS as $key) {
+            if ($key !== 'technical_key' && array_key_exists($key, $in)) {
                 $changes[$key] = $in[$key];
             }
         }
-        foreach (['active', 'deactivate_missing'] as $key) {
+        foreach (self::FLAG_SETTINGS as $key) {
             if (array_key_exists($key, $in)) {
                 $changes[$key] = $in[$key] ? 1 : 0;
             }
@@ -303,25 +295,41 @@ class SourceConfigTransfer
             $changes['xml_item_path'] = $merged['xml_item_path'];
         }
 
+        [$categories, $brands] = self::resolveMappings($document, $lookups, $idLang, $warnings);
+
+        return ['source' => $changes, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'warnings' => self::capWarnings($warnings)];
+    }
+    /**
+     * Resolves the mapping entries to IDs. An entry whose destination does not exist in this store is skipped with a warning,
+     * so an existing row stays as it is and no new row is created for it. null destination = auto-create.
+     *
+     * @return array{0: list<array>, 1: list<array>} categories, brands
+     */
+    private static function resolveMappings(array $document, array $lookups, int $idLang, array &$warnings): array
+    {
         $categories = [];
         foreach ($document['category_mappings'] as $row) {
             $label = 'Category mapping for "' . self::joinPath($row['source_path']) . '": category';
-            if ($row['category'] === null) {
-                $categories[] = ['source_path' => $row['source_path'], 'id_category' => null];
-            } elseif (($id = self::categoryId($row['category'], $label, $lookups, $idLang, $warnings)) !== null) {
-                $categories[] = ['source_path' => $row['source_path'], 'id_category' => $id];
+            $before = count($warnings);
+            $id = $row['category'] === null ? null : self::categoryId($row['category'], $label, $lookups, $idLang, $warnings);
+            if ($row['category'] !== null && $id === null) {
+                $warnings[$before] .= ' The entry was left unchanged.';
+                continue;
             }
+            $categories[] = ['source_path' => $row['source_path'], 'id_category' => $id];
         }
         $brands = [];
         foreach ($document['brand_mappings'] as $row) {
-            if ($row['manufacturer'] === null) {
-                $brands[] = ['source_name' => $row['source_name'], 'id_manufacturer' => null];
-            } elseif (($id = self::namedId($row['manufacturer'], $lookups['manufacturers'], 'Brand mapping for "' . $row['source_name'] . '": brand', $warnings)) !== null) {
-                $brands[] = ['source_name' => $row['source_name'], 'id_manufacturer' => $id];
+            $before = count($warnings);
+            $id = $row['manufacturer'] === null ? null : self::namedId($row['manufacturer'], $lookups['manufacturers'], 'Brand mapping for "' . $row['source_name'] . '": brand', $warnings);
+            if ($row['manufacturer'] !== null && $id === null) {
+                $warnings[$before] .= ' The entry was left unchanged.';
+                continue;
             }
+            $brands[] = ['source_name' => $row['source_name'], 'id_manufacturer' => $id];
         }
 
-        return ['source' => $changes, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'warnings' => self::capWarnings($warnings)];
+        return [$categories, $brands];
     }
 
     private static function categoryId(?array $path, string $label, array $lookups, int $idLang, array &$warnings): ?int
@@ -372,29 +380,33 @@ class SourceConfigTransfer
         return implode(' > ', $segments);
     }
 
-    /** The export form of a path: a " > " string, or the list itself when a name contains " > " and a string would not split back. */
-    private static function pathValue(array $segments)
+    /** The mapping-file form of a path: segments joined with " > ". A path that would not split back into the same segments cannot be written. */
+    private static function pathKey(array $segments): string
     {
-        foreach ($segments as $segment) {
-            if (str_contains((string) $segment, ' > ')) {
-                return array_values($segments);
-            }
+        $joined = self::joinPath($segments);
+        if (self::splitPath($joined) !== array_values($segments)) {
+            throw new \InvalidArgumentException('The category path "' . $joined . '" has a name containing " > " (or an edge that merges with the separator) and cannot be written in the YAML mappings. Rename that category.');
         }
 
-        return self::joinPath($segments);
+        return $joined;
     }
 
     /** Cross-field rules of a complete source (also applied to the merge result of an overwrite). */
     private static function checkSource(array $source): array
     {
-        if (!in_array($source['source_format'] ?? null, ['json', 'xml'], true)) {
-            throw new \InvalidArgumentException('"source.source_format" must be "json" or "xml".');
+        $formats = \ProductImport\Service\Format\FeedFormats::choices();
+        if (!isset($formats[$source['source_format'] ?? null])) {
+            throw new \InvalidArgumentException('"source.source_format" must be one of: ' . implode(', ', array_keys($formats)) . '.');
         }
-        if ($source['source_format'] === 'xml' && trim((string) ($source['xml_item_path'] ?? '')) === '') {
-            throw new \InvalidArgumentException('XML item path is required for XML sources.');
-        }
-        if ($source['source_format'] === 'json') {
-            $source['xml_item_path'] = null;
+        $options = \ProductImport\Service\Format\FeedFormats::get($source['source_format'])->options();
+        foreach (\ProductImport\Service\Format\FeedFormats::all() as $format) {
+            foreach ($format->options() as $column => $option) {
+                if (!isset($options[$column])) {
+                    $source[$column] = null;
+                } elseif ($option['required'] && trim((string) ($source[$column] ?? '')) === '') {
+                    throw new \InvalidArgumentException($option['label'] . ' is required for ' . $formats[$source['source_format']] . ' sources.');
+                }
+            }
         }
         self::validateSourceFields($source);
 
@@ -409,7 +421,7 @@ class SourceConfigTransfer
                 $source[$key] = self::requireString($in, $key);
             }
         }
-        foreach (['json_url', 'json_file_path', 'xml_item_path', 'filter_expression', 'default_manufacturer', 'supplier'] as $key) {
+        foreach (['location', 'xml_item_path', 'filter_expression', 'default_manufacturer', 'supplier'] as $key) {
             if (!$partial || array_key_exists($key, $in)) {
                 $source[$key] = self::optionalString($in, $key);
             }
@@ -423,12 +435,12 @@ class SourceConfigTransfer
             }
             $source[$key] = $in[$key];
         }
-        foreach (['name', 'technical_key', 'identifier_field', 'json_url', 'json_file_path', 'xml_item_path', 'filter_expression'] as $key) {
+        foreach (['name', 'technical_key', 'identifier_field', 'location', 'xml_item_path', 'filter_expression'] as $key) {
             if (isset($source[$key])) {
                 $source[$key] = trim($source[$key]);
             }
         }
-        foreach (['json_url', 'json_file_path', 'filter_expression'] as $key) {
+        foreach (['location', 'filter_expression'] as $key) {
             if (($source[$key] ?? null) === '') {
                 $source[$key] = null;
             }
@@ -436,8 +448,8 @@ class SourceConfigTransfer
         if (!$partial) {
             $source = self::checkSource($source);
         } else {
-            if (isset($source['source_format']) && !in_array($source['source_format'], ['json', 'xml'], true)) {
-                throw new \InvalidArgumentException('"source.source_format" must be "json" or "xml".');
+            if (isset($source['source_format']) && !\ProductImport\Service\Format\FeedFormats::has($source['source_format'])) {
+                throw new \InvalidArgumentException('"source.source_format" must be one of: ' . implode(', ', array_keys(\ProductImport\Service\Format\FeedFormats::choices())) . '.');
             }
             foreach (['name' => 191, 'technical_key' => 64] as $key => $limit) {
                 if (isset($source[$key]) && ($source[$key] === '' || mb_strlen($source[$key]) > $limit)) {
@@ -528,12 +540,15 @@ class SourceConfigTransfer
         if (!preg_match('/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/D', (string) $data['technical_key'])) {
             throw new \InvalidArgumentException('Technical key must be a lowercase slug (letters, numbers, underscores or hyphens).');
         }
-        $url = (string) ($data['json_url'] ?? '');
-        if ($url === '' && (string) ($data['json_file_path'] ?? '') === '') {
-            throw new \InvalidArgumentException('Provide a JSON URL or file path.');
+        $location = trim((string) ($data['location'] ?? ''));
+        if ($location === '') {
+            throw new \InvalidArgumentException('Provide a source: an http:// or https:// URL, or a file path inside the import folder.');
         }
-        if ($url !== '' && (!filter_var($url, FILTER_VALIDATE_URL) || !in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true))) {
-            throw new \InvalidArgumentException('JSON URL must be a valid HTTP or HTTPS URL.');
+        if (preg_match('/^([a-z][a-z0-9+.\-]+):/i', $location, $scheme) === 1) {
+            $isUrl = in_array(strtolower($scheme[1]), ['http', 'https'], true) && str_starts_with(substr($location, strlen($scheme[1]) + 1), '//');
+            if (!$isUrl || !filter_var($location, FILTER_VALIDATE_URL)) {
+                throw new \InvalidArgumentException('Source must be a valid HTTP or HTTPS URL or a file path; "' . $scheme[1] . ':" locations are not supported.');
+            }
         }
     }
 
@@ -563,12 +578,10 @@ class SourceConfigTransfer
         if ($value === null) {
             return null;
         }
-        if (is_string($value) && $value !== '') {
-            $value = self::splitPath($value);
+        if (!is_string($value) || $value === '') {
+            throw new \InvalidArgumentException('"' . $label . '" must be a category path like "Home > Sport" (names joined with " > "; a name that itself contains " > " cannot be written) or null.');
         }
-        if (!is_array($value) || $value === [] || !array_is_list($value)) {
-            throw new \InvalidArgumentException('"' . $label . '" must be a category path like "Home > Sport", a non-empty list of names, or null.');
-        }
+        $value = self::splitPath($value);
         foreach ($value as $segment) {
             if (!is_string($segment) || trim($segment) === '' || mb_strlen($segment) > 191) {
                 throw new \InvalidArgumentException('"' . $label . '" must contain only non-empty names.');

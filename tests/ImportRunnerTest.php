@@ -7,7 +7,7 @@ use ProductImport\Repository\ExternalProductRepository;
 use ProductImport\Repository\ExternalCombinationRepository;
 use ProductImport\Repository\ImportRunRepository;
 use ProductImport\Repository\SourceRepository;
-use ProductImport\Service\{JsonFetcher, ProductFilter, ProductFieldMapper, CategoryPathNormalizer, CategoryResolver, ManufacturerResolver, ProductImporter, VariantFieldMapper, AttributeResolver, CombinationImporter, ImportCatalog, ImportRunner, ExpressionEvaluator, ImportedValues};
+use ProductImport\Service\{ProductFilter, ProductFieldMapper, CategoryPathNormalizer, CategoryResolver, ManufacturerResolver, ProductImporter, VariantFieldMapper, AttributeResolver, CombinationImporter, ImportCatalog, ImportRunner, ExpressionEvaluator, ImportedValues};
 
 class ImportRunnerTest extends TestCase
 {
@@ -17,17 +17,11 @@ class ImportRunnerTest extends TestCase
             'combinations' => ['old:stale' => ['id_product' => 10, 'id_product_attribute' => 50, 'id_run_last_seen' => null]],
             'triggers' => [], 'deactivated' => [], 'zeroed' => [], 'finished' => [], 'prices' => [], 'staleCalls' => 0, 'emptyStreakUpdates' => [],
             'activeInStore' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => []];
-        $fetcher = new class ($items, $fetchFails) extends JsonFetcher {
-            public function __construct(private array $items, private bool $fails)
-            {
+        $fetcher = static function (array $source) use ($items, $fetchFails): array {
+            if ($fetchFails) {
+                throw new \RuntimeException('fetch failed');
             }
-            public function fetch(?string $url, ?string $filePath): array
-            {
-                if ($this->fails) {
-                    throw new \RuntimeException('fetch failed');
-                }
-                return $this->items;
-            }
+            return $items;
         };
         $links = new class ($state) extends ExternalProductRepository {
             public function __construct(private object $state)
@@ -195,7 +189,7 @@ class ImportRunnerTest extends TestCase
             }
         };
         $evaluator = new ExpressionEvaluator();
-        $runner = new ImportRunner($fetcher, new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, $products, new VariantFieldMapper($evaluator), $attributes, $combinations, $links, $combinationLinks, $sources, $runs, $catalog, null, '1.0.0');
+        $runner = new ImportRunner($fetcher, new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, $products, new VariantFieldMapper($evaluator), $attributes, $combinations, $links, $combinationLinks, $sources, $runs, $catalog, '1.0.0');
         return [$runner, $state];
     }
 

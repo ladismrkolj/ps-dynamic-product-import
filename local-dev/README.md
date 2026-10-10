@@ -33,9 +33,11 @@ logs and the storefront responds before installing the module:
 - Login: `ADMIN_MAIL` / `ADMIN_PASSWD` from `.env`.
 - Module screens: Catalog → Product Import / Product Import runs.
 
-`HOST_PORT` in `.env` changes the port if 8080 is in use. For an already
-installed module use PrestaShop's module upgrade action; reinstalling can
-remove its source configuration.
+`HOST_PORT` in `.env` changes the port if 8080 is in use. The module has no
+upgrade scripts: after schema changes, uninstall and reinstall it. This
+deletes sources, mappings and product links; delete imported DEMO products
+first, or the next import duplicates them. Export sources as YAML beforehand
+to re-import them afterwards.
 
 ## Unit tests and formatting
 
@@ -58,9 +60,11 @@ For changed PHP files, also run `php -l` in the running store container.
 ## Store integration tests
 
 Follow [the JSON and XML examples](../examples/README.md) to configure two
-sources from read-only files already mounted into the store at
-`/opt/productimport-examples/`. Test source and Test configuration should both
-work. Import each source, verify the four DEMO products, then import again and
+sources from read-only files already mounted into the store at the default
+import folder, `/var/www/html/var/productimport/feeds/`. Use `products.json`
+and `products.xml` as the Source. The feed loads automatically on save, the
+identifier is suggested, and the Categories and Brands tabs fill by
+themselves. Import each source, verify the four DEMO products, then import again and
 verify that product IDs/counts stay stable. Check stock, active status, brand,
 category and discounted price. Record each result.
 

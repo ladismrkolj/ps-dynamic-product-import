@@ -1,32 +1,28 @@
 <?php
 
-namespace ProductImport\Service;
+namespace ProductImport\Service\Format;
 
-class XmlFetcher
+class XmlFormat implements FeedFormat
 {
-    private FeedDownloader $downloader;
-
-    public function __construct(?FeedDownloader $downloader = null)
+    public function name(): string
     {
-        $this->downloader = $downloader ?? new FeedDownloader();
+        return 'xml';
     }
 
-    public function fetch(?string $url, ?string $filePath, ?string $itemPath): array
+    public function label(): string
     {
-        if ($url !== null && trim($url) !== '') {
-            $body = $this->fetchUrl($url);
-        } elseif ($filePath !== null && trim($filePath) !== '') {
-            $body = $this->downloader->readFile($filePath, 'XML');
-        } else {
-            throw new \InvalidArgumentException('Provide an XML URL or file path.');
-        }
-
-        return $this->parse($body, $itemPath);
+        return 'XML';
     }
 
-    public function parse(string $body, ?string $itemPath): array
+    public function options(): array
     {
-        if ($itemPath === null || trim($itemPath) === '') {
+        return ['xml_item_path' => ['label' => 'XML item path', 'required' => true]];
+    }
+
+    public function parse(string $body, array $source): array
+    {
+        $itemPath = $source['xml_item_path'] ?? null;
+        if (!is_string($itemPath) || trim($itemPath) === '') {
             throw new \InvalidArgumentException('Provide an XML item path.');
         }
         $path = trim($itemPath);
@@ -107,10 +103,5 @@ class XmlFetcher
             $result['@value'] = trim((string) $element);
         }
         return $result === [] ? trim((string) $element) : $result;
-    }
-
-    private function fetchUrl(string $url): string
-    {
-        return $this->downloader->fetchUrl($url, 'XML');
     }
 }

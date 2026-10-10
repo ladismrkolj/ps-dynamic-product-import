@@ -8,9 +8,8 @@ use ProductImport\Service\AttributeResolver;
 use ProductImport\Service\BackgroundImport;
 use ProductImport\Service\CategoryResolver;
 use ProductImport\Service\FeedDownloader;
-use ProductImport\Service\JsonFetcher;
+use ProductImport\Service\FeedFetcher;
 use ProductImport\Service\ManufacturerResolver;
-use ProductImport\Service\XmlFetcher;
 
 class FeedDownloaderTest extends TestCase
 {
@@ -57,7 +56,7 @@ class FeedDownloaderTest extends TestCase
             ['status' => 503, 'body' => '', 'error' => null, 'too_large' => false],
             self::ok('[]'),
         ]));
-        self::assertSame([], (new JsonFetcher($downloader))->fetch('http://feed', null));
+        self::assertSame([], FeedFetcher::fetch(['location' => 'http://feed', 'source_format' => 'json'], $downloader));
         self::assertSame(2, $calls['n']);
         self::assertSame([2], $sleeps);
     }
@@ -69,7 +68,7 @@ class FeedDownloaderTest extends TestCase
         $downloader = new FeedDownloader(1000, [2, 5], static function (int $s): void {
         }, $this->transport($calls, [$fail, $fail, $fail, $fail]));
         try {
-            (new XmlFetcher($downloader))->fetch('http://feed', null, 'a');
+            FeedFetcher::fetch(['location' => 'http://feed', 'source_format' => 'xml', 'xml_item_path' => 'a'], $downloader);
             self::fail('Expected exception');
         } catch (\RuntimeException $error) {
             self::assertStringContainsString('timeout', $error->getMessage());
@@ -83,7 +82,7 @@ class FeedDownloaderTest extends TestCase
         $downloader = new FeedDownloader(1000, [2, 5], static function (int $s): void {
         }, $this->transport($calls, [['status' => 404, 'body' => '', 'error' => null, 'too_large' => false], self::ok('[]')]));
         try {
-            (new JsonFetcher($downloader))->fetch('http://feed', null);
+            FeedFetcher::fetch(['location' => 'http://feed', 'source_format' => 'json'], $downloader);
             self::fail('Expected exception');
         } catch (\RuntimeException $error) {
             self::assertStringContainsString('HTTP 404', $error->getMessage());
@@ -97,7 +96,7 @@ class FeedDownloaderTest extends TestCase
         $downloader = new FeedDownloader(1000, [2, 5], static function (int $s): void {
         }, $this->transport($calls, [['status' => 200, 'body' => '', 'error' => null, 'too_large' => true], self::ok('[]')]));
         try {
-            (new JsonFetcher($downloader))->fetch('http://feed', null);
+            FeedFetcher::fetch(['location' => 'http://feed', 'source_format' => 'json'], $downloader);
             self::fail('Expected exception');
         } catch (\RuntimeException $error) {
             self::assertStringContainsString('size limit', $error->getMessage());
@@ -112,7 +111,7 @@ class FeedDownloaderTest extends TestCase
             file_put_contents($file, '["' . str_repeat('x', 100) . '"]');
             $this->expectException(\RuntimeException::class);
             $this->expectExceptionMessage('size limit');
-            (new JsonFetcher(new FeedDownloader(50)))->fetch(null, $file);
+            FeedFetcher::fetch(['location' => basename($file), 'source_format' => 'json'], new FeedDownloader(50), dirname($file));
         } finally {
             unlink($file);
         }

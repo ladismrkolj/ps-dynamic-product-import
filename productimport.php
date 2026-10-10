@@ -31,9 +31,8 @@ class ProductImport extends Module
             `id_source` INT UNSIGNED NOT NULL AUTO_INCREMENT,
             `name` VARCHAR(191) NOT NULL,
             `technical_key` VARCHAR(64) NOT NULL,
-            `json_url` TEXT NULL,
-            `json_file_path` TEXT NULL,
-            `source_format` VARCHAR(8) NULL,
+            `location` TEXT NOT NULL,
+            `source_format` VARCHAR(16) NOT NULL DEFAULT \'json\',
             `xml_item_path` VARCHAR(255) NULL,
             `identifier_field` VARCHAR(191) NOT NULL,
             `filter_expression` LONGTEXT NULL,
@@ -60,6 +59,7 @@ class ProductImport extends Module
             `id_source` INT UNSIGNED NOT NULL,
             `source_name` VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
             `id_manufacturer` INT UNSIGNED NULL,
+            `date_seen` DATETIME NULL,
             `date_upd` DATETIME NOT NULL,
             PRIMARY KEY (`id_mapping`),
             UNIQUE KEY `source_name` (`id_source`, `source_name`)
@@ -72,6 +72,7 @@ class ProductImport extends Module
             `source_path_hash` CHAR(40) NOT NULL,
             `source_path` TEXT NOT NULL,
             `id_category` INT UNSIGNED NULL,
+            `date_seen` DATETIME NULL,
             `date_upd` DATETIME NOT NULL,
             PRIMARY KEY (`id_mapping`),
             UNIQUE KEY `source_path` (`id_source`, `source_path_hash`)
@@ -131,12 +132,16 @@ class ProductImport extends Module
         if (!Configuration::updateValue('PIIMPORT_CRON_TOKEN', bin2hex(random_bytes(20)))) {
             return false;
         }
-        foreach (['AdminPiSource' => 'Product Import', 'AdminPiRunLog' => 'Product Import runs', 'AdminPiCategoryMap' => 'Category mappings', 'AdminPiManufacturerMap' => 'Brand mappings'] as $class => $title) {
+        $feedDir = _PS_ROOT_DIR_ . '/var/productimport/feeds';
+        if ((!is_dir($feedDir) && !@mkdir($feedDir, 0775, true) && !is_dir($feedDir)) || !Configuration::updateValue('PIIMPORT_FEED_DIR', $feedDir)) {
+            return false;
+        }
+        foreach (['AdminPiSource' => 'Product Import', 'AdminPiRunLog' => 'Product Import runs'] as $class => $title) {
             $tab = new Tab();
             $tab->active = 1;
             $tab->class_name = $class;
             $tab->module = $this->name;
-            $tab->id_parent = in_array($class, ['AdminPiCategoryMap', 'AdminPiManufacturerMap'], true) ? -1 : (int) Tab::getIdFromClassName('AdminCatalog');
+            $tab->id_parent = (int) Tab::getIdFromClassName('AdminCatalog');
             foreach (Language::getLanguages(false) as $language) {
                 $tab->name[(int) $language['id_lang']] = $title;
             }
@@ -154,13 +159,13 @@ class ProductImport extends Module
                 return false;
             }
         }
-        foreach (['AdminPiManufacturerMap', 'AdminPiCategoryMap', 'AdminPiRunLog', 'AdminPiSource'] as $class) {
+        foreach (['AdminPiRunLog', 'AdminPiSource'] as $class) {
             $idTab = (int) Tab::getIdFromClassName($class);
             if ($idTab && !(new Tab($idTab))->delete()) {
                 return false;
             }
         }
-        if (!Configuration::deleteByName('PIIMPORT_CRON_TOKEN')) {
+        if (!Configuration::deleteByName('PIIMPORT_CRON_TOKEN') || !Configuration::deleteByName('PIIMPORT_FEED_DIR')) {
             return false;
         }
 

@@ -47,7 +47,9 @@ services:
       # check. This named volume shadows just that subpath with a
       # container-appropriate, --no-dev build (see `dev.sh up` / README).
       - module_vendor:/var/www/html/modules/productimport/vendor
-      - ../examples:/opt/productimport-examples:ro
+      # Example feeds at the module's default import folder (PIIMPORT_FEED_DIR),
+      # read-only; install() skips mkdir when the folder already exists.
+      - ../examples:/var/www/html/var/productimport/feeds:ro
 
   composer:
     profiles: [tools]

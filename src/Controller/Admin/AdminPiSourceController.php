@@ -24,10 +24,15 @@ class AdminPiSourceController extends ModuleAdminController
 
     public function postProcess()
     {
-        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'testSource' => 'ajaxProcessTestSource', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
+        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'addMapping' => 'ajaxProcessAddMapping', 'deleteMapping' => 'ajaxProcessDeleteMapping', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
         $action = Tools::getValue('action');
         if ($this->ajax && is_string($action) && isset($actions[$action])) {
             $this->{$actions[$action]}();
+            return;
+        }
+        if (Tools::isSubmit('submitPiFeedDir')) {
+            $this->saveFeedDir();
+
             return;
         }
         $saving = Tools::isSubmit('submitAddpi_source');
@@ -181,7 +186,7 @@ class AdminPiSourceController extends ModuleAdminController
     private function feedInput(): array
     {
         $input = [];
-        foreach (['json_url', 'json_file_path', 'source_format', 'xml_item_path'] as $key) {
+        foreach (['location', 'source_format', 'xml_item_path'] as $key) {
             $value = $_POST[$key] ?? null;
             if ($value !== null && !is_string($value)) {
                 throw new InvalidArgumentException($key . ' must be a string.');
@@ -282,16 +287,65 @@ class AdminPiSourceController extends ModuleAdminController
     public function ajaxProcessInspect()
     {
         try {
-            $this->editorContext();
+            [, $source] = $this->editorContext();
             $feed = $this->cachedFeed($this->feedInput());
             if ($feed['items'] === []) {
                 throw new InvalidArgumentException('Source feed must contain products.');
             }
             $result = ['item_count' => count($feed['items']), 'schema' => (new \ProductImport\Service\FeedSchema())->scan($feed['items']), 'cache' => $this->cacheInfo($feed)];
+            if ($source !== null) {
+                $result['discovery'] = $this->discoverSaved($feed['items'], $source);
+            }
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }
         $this->sendJson($result);
+    }
+
+    /**
+     * Records the categories and brands of a loaded feed using the saved expressions. Failures are reported per section so
+     * they never block the editor. `new` counts the mapping rows this run created.
+     *
+     * @return array{categories: array, brands: array}
+     */
+    private function discoverSaved(array $items, array $source): array
+    {
+        $discovery = [];
+        try {
+            $mapping = json_decode((string) $source['field_mapping'], true, 512, JSON_THROW_ON_ERROR);
+            if (!is_array($mapping)) {
+                throw new InvalidArgumentException('Saved field_mapping must be a JSON object.');
+            }
+            $mappingError = null;
+        } catch (Throwable $error) {
+            $mapping = [];
+            $mappingError = $error->getMessage();
+        }
+        $idSource = (int) $source['id_source'];
+        foreach (['categories' => 'category_paths', 'brands' => 'manufacturer'] as $section => $target) {
+            try {
+                if ($mappingError !== null) {
+                    throw new InvalidArgumentException($mappingError);
+                }
+                $expression = $mapping[$target] ?? null;
+                if ($expression !== null && !is_string($expression)) {
+                    throw new InvalidArgumentException('Saved ' . $target . ' expression must be a string.');
+                }
+                if ($expression === null || trim($expression) === '') {
+                    $discovery[$section] = ['skipped' => 'no saved ' . $target . ' expression'];
+                    continue;
+                }
+                $repository = $section === 'brands' ? new \ProductImport\Repository\ManufacturerMappingRepository() : new \ProductImport\Repository\CategoryMappingRepository();
+                $before = count($repository->findAllForSource($idSource));
+                $found = $this->discoverValues($items, $idSource, $expression, $section === 'brands');
+                $found['new'] = max(0, count($repository->findAllForSource($idSource)) - $before);
+                $discovery[$section] = $found;
+            } catch (Throwable $error) {
+                $discovery[$section] = ['error' => $error->getMessage()];
+            }
+        }
+
+        return $discovery;
     }
 
     public function ajaxProcessDiscoverCategories()
@@ -305,56 +359,6 @@ class AdminPiSourceController extends ModuleAdminController
             }
             $items = $this->cachedFeed($source)['items'];
             $result = $this->discoverValues($items, (int) $source['id_source'], $expression, false);
-        } catch (Throwable $error) {
-            $result = ['error' => $error->getMessage()];
-        }
-        $this->sendJson($result);
-    }
-
-    public function ajaxProcessTestSource()
-    {
-        try {
-            [$idSource, $source] = $this->editorContext();
-            // Always test the submitted location, never silently substitute the saved URL/path.
-            $input = $this->feedInput();
-            $feed = $this->cachedFeed($input);
-            $items = $feed['items'];
-            if ($items === []) {
-                throw new InvalidArgumentException('Source feed must contain products.');
-            }
-            $result = ['connectivity' => ['ok' => true, 'format' => ($input['source_format'] === 'xml' ? 'non-empty XML items' : 'non-empty JSON array')], 'item_count' => count($items),
-                'schema' => (new \ProductImport\Service\FeedSchema())->scan($items), 'cache' => $this->cacheInfo($feed)];
-            $mapping = [];
-            $mappingError = null;
-            if ($source !== null) {
-                try {
-                    $mapping = json_decode($source['field_mapping'], true, 512, JSON_THROW_ON_ERROR);
-                    if (!is_array($mapping)) {
-                        throw new InvalidArgumentException('Saved field_mapping must be a JSON object.');
-                    }
-                } catch (Throwable $error) {
-                    $mappingError = $error->getMessage();
-                }
-            }
-            foreach (['categories' => 'category_paths', 'brands' => 'manufacturer'] as $section => $target) {
-                try {
-                    if ($source === null) {
-                        $result[$section] = ['skipped' => 'source not saved yet'];
-                    } elseif ($mappingError !== null) {
-                        $result[$section] = ['error' => $mappingError];
-                    } elseif (!isset($mapping[$target]) || $mapping[$target] === '') {
-                        $result[$section] = ['skipped' => 'no saved ' . $target . ' expression'];
-                    } elseif (!is_string($mapping[$target])) {
-                        throw new InvalidArgumentException('Saved ' . $target . ' expression must be a string.');
-                    } elseif (trim($mapping[$target]) === '') {
-                        $result[$section] = ['skipped' => 'no saved ' . $target . ' expression'];
-                    } else {
-                        $result[$section] = $this->discoverValues($items, $idSource, $mapping[$target], $section === 'brands');
-                    }
-                } catch (Throwable $error) {
-                    $result[$section] = ['error' => $error->getMessage()];
-                }
-            }
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }
@@ -379,7 +383,7 @@ class AdminPiSourceController extends ModuleAdminController
         $this->sendJson($result);
     }
 
-    /** Full-feed scan shared by the existing discovery button and Test source; writes only after deduplication. */
+    /** Full-feed scan shared by the discovery button and the automatic discovery after a feed load; writes only after deduplication. */
     private function discoverValues(array $items, int $idSource, string $expression, bool $brands): array
     {
         $evaluator = new \ProductImport\Service\ExpressionEvaluator();
@@ -425,7 +429,7 @@ class AdminPiSourceController extends ModuleAdminController
             (new \ProductImport\Service\CategoryResolver(new \ProductImport\Repository\CategoryMappingRepository(), $normalizer))->discover(array_values($values), $idSource);
         }
         return [$brands ? 'unique_brands' : 'unique_paths' => count($values), 'items_scanned' => count($items), 'failed_items' => $failed, 'errors' => $errors,
-            'errors_omitted' => max(0, $failed - count($errors)), 'mapping_url' => $this->context->link->getAdminLink($brands ? 'AdminPiManufacturerMap' : 'AdminPiCategoryMap') . '&id_source=' . $idSource];
+            'errors_omitted' => max(0, $failed - count($errors))];
     }
 
     private function mappingContext(string $permission): array
@@ -465,7 +469,7 @@ class AdminPiSourceController extends ModuleAdminController
                 $id = $row[$idColumn] === null ? null : (int) $row[$idColumn];
                 $rows[] = ['key' => $category ? $row['source_path_hash'] : $row['source_name'],
                     'label' => $category ? implode(' > ', json_decode($row['source_path'], true, 512, JSON_THROW_ON_ERROR)) : $row['source_name'],
-                    'id' => $id, 'status' => $this->mappingStatus($id, $default, $names, $category)];
+                    'id' => $id, 'seen' => $row['date_seen'] ?: null, 'status' => $this->mappingStatus($id, $default, $names, $category)];
             }
             $this->sendJson(['default' => $default === null ? null : (int) $default, 'rows' => $rows,
                 'options' => array_map(static function ($option) use ($idColumn) {
@@ -480,14 +484,7 @@ class AdminPiSourceController extends ModuleAdminController
     {
         try {
             [$source, $category, $options, $names, $idColumn] = $this->mappingContext('edit');
-            $value = Tools::getValue('value', '');
-            if (!is_string($value) || ($value !== '' && (!ctype_digit($value) || (int) $value <= 0))) {
-                throw new InvalidArgumentException($category ? 'Invalid category.' : 'Invalid manufacturer.');
-            }
-            $id = $value === '' ? null : (int) $value;
-            if ($id !== null && !in_array($id, array_column($options, $idColumn), true)) {
-                throw new InvalidArgumentException($category ? 'Category is not available in this shop.' : 'Manufacturer does not exist.');
-            }
+            $id = $this->mappingDestination($category, $options, $idColumn);
             $idSource = (int) $source['id_source'];
             if ($default) {
                 if (!$this->sources->update($idSource, ['default_' . $idColumn => $id])) {
@@ -502,6 +499,79 @@ class AdminPiSourceController extends ModuleAdminController
                 $repository->setOverride($idSource, $key, $id);
             }
             $this->sendJson(['ok' => true, 'status' => $this->mappingStatus($id, $default ? null : $source['default_' . $idColumn], $names, $category)]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+    }
+
+    /** The destination ID posted as `value` ('' = none), checked against the available options. */
+    private function mappingDestination(bool $category, array $options, string $idColumn): ?int
+    {
+        $value = Tools::getValue('value', '');
+        if (!is_string($value) || ($value !== '' && (!ctype_digit($value) || (int) $value <= 0))) {
+            throw new InvalidArgumentException($category ? 'Invalid category.' : 'Invalid manufacturer.');
+        }
+        $id = $value === '' ? null : (int) $value;
+        if ($id !== null && !in_array($id, array_column($options, $idColumn), true)) {
+            throw new InvalidArgumentException($category ? 'Category is not available in this shop.' : 'Manufacturer does not exist.');
+        }
+
+        return $id;
+    }
+
+    /** Adds a mapping row for a feed category path or brand that has not been seen in the feed yet. */
+    public function ajaxProcessAddMapping()
+    {
+        try {
+            [$source, $category, $options, , $idColumn] = $this->mappingContext('edit');
+            $idSource = (int) $source['id_source'];
+            $id = $this->mappingDestination($category, $options, $idColumn);
+            $label = Tools::getValue('label');
+            if (!is_string($label) || trim($label) === '') {
+                throw new InvalidArgumentException($category ? 'Enter the feed category path.' : 'Enter the feed brand name.');
+            }
+            if ($category) {
+                $path = array_map('trim', \ProductImport\Service\SourceConfigTransfer::splitPath($label));
+                foreach ($path as $segment) {
+                    if ($segment === '' || mb_strlen($segment) > 191) {
+                        throw new InvalidArgumentException('Write the feed category path as names (1 to 191 characters each) separated by " > ", for example "Sports > Sails".');
+                    }
+                }
+                $created = (new \ProductImport\Repository\CategoryMappingRepository())->createManual(
+                    $idSource,
+                    (new \ProductImport\Service\CategoryPathNormalizer())->hash($path),
+                    json_encode($path, JSON_THROW_ON_ERROR),
+                    $id
+                );
+            } else {
+                $name = trim($label);
+                if (mb_strlen($name) > 191) {
+                    throw new InvalidArgumentException('The brand name must not exceed 191 characters.');
+                }
+                $created = (new \ProductImport\Repository\ManufacturerMappingRepository())->createManual($idSource, $name, $id);
+            }
+            if (!$created) {
+                throw new InvalidArgumentException($category ? 'This feed category is already in the list.' : 'This feed brand is already in the list.');
+            }
+            $this->sendJson(['ok' => true]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+    }
+
+    /** Deletes one mapping row of this source. A feed that still contains the value brings it back as auto-create. */
+    public function ajaxProcessDeleteMapping()
+    {
+        try {
+            [$source, $category] = $this->mappingContext('edit');
+            $idSource = (int) $source['id_source'];
+            $key = Tools::getValue('key');
+            $repository = $category ? new \ProductImport\Repository\CategoryMappingRepository() : new \ProductImport\Repository\ManufacturerMappingRepository();
+            if (!is_string($key) || !$repository->findOverride($idSource, $key)) {
+                throw new InvalidArgumentException($category ? 'Unknown source path.' : 'Unknown source brand.');
+            }
+            $repository->delete($idSource, $key);
+            $this->sendJson(['ok' => true]);
         } catch (Throwable $error) {
             $this->sendJson(['error' => $error->getMessage()]);
         }
@@ -601,12 +671,60 @@ class AdminPiSourceController extends ModuleAdminController
             $importPanel = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/source_import.tpl');
         }
 
-        return '<div class="alert alert-info">Daily cron URL: <code>' . Tools::safeOutput($cronUrl) . '</code> &mdash; append <code>&amp;source=&lt;ID&gt;</code> to import one specific source instead of all active ones (see the ID column below).</div>' . $panel . $helper->generateList($sources, [
+        $feedDirPanel = $this->renderFeedDirPanel();
+
+        return $feedDirPanel . '<div class="alert alert-info">Daily cron URL: <code>' . Tools::safeOutput($cronUrl) . '</code> &mdash; append <code>&amp;source=&lt;ID&gt;</code> to import one specific source instead of all active ones (see the ID column below).</div>' . $panel . $helper->generateList($sources, [
             'id_source' => ['title' => $this->trans('ID')],
             'name' => ['title' => $this->trans('Name')],
             'technical_key' => ['title' => $this->trans('Technical key')],
             'active' => ['title' => $this->trans('Active'), 'type' => 'bool'],
         ]) . $importPanel;
+    }
+
+    private function locationHelp(): string
+    {
+        return Tools::safeOutput($this->trans('https://… to download, or a file path inside %dir% (e.g. products.json)', ['%dir%' => \ProductImport\Service\FeedLocation::feedDir() ?: '(import folder not configured)']));
+    }
+
+    private function saveFeedDir(): void
+    {
+        if (!$this->access('edit') || !$this->checkToken()) {
+            $this->errors[] = $this->trans('You do not have permission or your security token is invalid.');
+
+            return;
+        }
+        $dir = Tools::getValue('feed_dir', '');
+        $dir = is_string($dir) ? rtrim(trim($dir), '/') : '';
+        if ($dir === '' || $dir[0] !== '/' || str_contains($dir, "\0") || in_array('..', explode('/', $dir), true)) {
+            $this->errors[] = $this->trans('The import folder must be an absolute path without "..".');
+
+            return;
+        }
+        if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+            $this->errors[] = $this->trans('The import folder does not exist and could not be created.');
+
+            return;
+        }
+        $real = realpath($dir);
+        if ($real === false || !Configuration::updateValue(\ProductImport\Service\FeedLocation::CONFIG_KEY, $real)) {
+            $this->errors[] = $this->trans('Unable to save the import folder.');
+
+            return;
+        }
+        $this->confirmations[] = $this->trans('Import folder saved.');
+    }
+
+    private function renderFeedDirPanel(): string
+    {
+        if (!$this->access('edit')) {
+            return '';
+        }
+
+        return '<form method="post" action="' . Tools::safeOutput(self::$currentIndex . '&token=' . $this->token) . '" class="panel form-inline">'
+            . '<h3>' . Tools::safeOutput($this->trans('Import folder')) . '</h3>'
+            . '<p class="help-block">' . Tools::safeOutput($this->trans('File sources must be inside this folder; relative paths resolve inside it.')) . '</p>'
+            . '<input type="text" name="feed_dir" class="form-control" style="width:40em" value="' . Tools::safeOutput(\ProductImport\Service\FeedLocation::feedDir()) . '" aria-label="' . Tools::safeOutput($this->trans('Import folder')) . '"> '
+            . '<button type="submit" name="submitPiFeedDir" value="1" class="btn btn-default">' . Tools::safeOutput($this->trans('Save')) . '</button></form>';
     }
 
     public function renderForm()
@@ -622,11 +740,11 @@ class AdminPiSourceController extends ModuleAdminController
             return '';
         }
         $source += [
-            'name' => '', 'technical_key' => '', 'json_url' => '', 'json_file_path' => '', 'source_format' => 'json', 'xml_item_path' => '',
+            'name' => '', 'technical_key' => '', 'location' => '', 'source_format' => 'json', 'xml_item_path' => '',
             'identifier_field' => '', 'filter_expression' => '', 'field_mapping' => '{}', 'active' => 1,
             'variant_mapping' => null, 'root_category_id' => null, 'id_supplier' => null, 'id_lang_default' => 1, 'deactivate_missing' => 0,
         ];
-        $source['source_format'] = in_array($source['source_format'], ['json', 'xml'], true) ? $source['source_format'] : 'json';
+        $source['source_format'] = \ProductImport\Service\Format\FeedFormats::has((string) $source['source_format']) ? $source['source_format'] : 'json';
         $mapping = json_decode($source['field_mapping'], true);
         $rows = $this->submittedMapping;
         if ($rows === null) {
@@ -659,8 +777,7 @@ class AdminPiSourceController extends ModuleAdminController
         $filterHelp = $helpTemplate->fetch();
         $inputs = [];
         foreach ([
-            'name' => 'Name', 'technical_key' => 'Technical key', 'json_url' => 'JSON URL',
-            'json_file_path' => 'JSON file path', 'identifier_field' => 'Identifier field',
+            'name' => 'Name', 'technical_key' => 'Technical key', 'location' => 'Source', 'identifier_field' => 'Identifier field',
         ] as $name => $label) {
             if ($name === 'identifier_field') {
                 $inputs[] = ['type' => 'html', 'name' => 'source_test', 'html_content' => $testHtml];
@@ -671,13 +788,13 @@ class AdminPiSourceController extends ModuleAdminController
             }
             $inputs[] = [
                 'type' => 'text', 'label' => $this->trans($label), 'name' => $name, 'id' => $name,
-                'required' => in_array($name, ['name', 'technical_key'], true),
-                'desc' => '',
+                'required' => in_array($name, ['name', 'technical_key', 'location'], true),
+                'desc' => $name === 'location' ? $this->locationHelp() : '',
             ];
         }
-        array_splice($inputs, 4, 0, [[
+        array_splice($inputs, 3, 0, [[
             'type' => 'select', 'name' => 'source_format', 'id' => 'source_format', 'label' => $this->trans('Format'),
-            'options' => ['query' => [['value' => 'json', 'label' => 'JSON'], ['value' => 'xml', 'label' => 'XML']], 'id' => 'value', 'name' => 'label'],
+            'options' => ['query' => array_map(static fn ($name, $label) => ['value' => $name, 'label' => $label], array_keys(\ProductImport\Service\Format\FeedFormats::choices()), \ProductImport\Service\Format\FeedFormats::choices()), 'id' => 'value', 'name' => 'label'],
         ], [
             'type' => 'text', 'name' => 'xml_item_path', 'id' => 'xml_item_path', 'label' => $this->trans('XML item path'),
             'desc' => $this->trans('Only for XML sources: the path from the XML root to each repeating product element, e.g. products/product.'),
@@ -734,7 +851,7 @@ class AdminPiSourceController extends ModuleAdminController
     private function readSubmission(): array
     {
         $data = [];
-        foreach (['name', 'technical_key', 'json_url', 'json_file_path', 'identifier_field', 'filter_expression', 'xml_item_path'] as $field) {
+        foreach (['name', 'technical_key', 'location', 'identifier_field', 'filter_expression', 'xml_item_path'] as $field) {
             $value = Tools::getValue($field, '');
             if (!is_string($value)) {
                 throw new InvalidArgumentException('Invalid value for ' . $field . '.');
@@ -742,11 +859,19 @@ class AdminPiSourceController extends ModuleAdminController
             $data[$field] = trim($value);
         }
         $format = Tools::getValue('source_format', 'json');
-        $data['source_format'] = in_array($format, ['json', 'xml'], true) ? $format : 'json';
-        if ($data['source_format'] === 'xml' && $data['xml_item_path'] === '') {
-            throw new InvalidArgumentException('XML item path is required for XML sources.');
+        if (!is_string($format) || !\ProductImport\Service\Format\FeedFormats::has($format)) {
+            throw new InvalidArgumentException('Choose a supported source format.');
         }
-        if ($data['source_format'] === 'json') {
+        $data['source_format'] = $format;
+        // Resolve only validates the location (scheme, import-folder containment); the file may not exist yet.
+        \ProductImport\Service\FeedLocation::resolve($data['location']);
+        $options = \ProductImport\Service\Format\FeedFormats::get($format)->options();
+        foreach ($options as $option => $definition) {
+            if ($definition['required'] && $data[$option] === '') {
+                throw new InvalidArgumentException($definition['label'] . ' is required for ' . $format . ' sources.');
+            }
+        }
+        if (!isset($options['xml_item_path'])) {
             $data['xml_item_path'] = null;
         }
         foreach (['active', 'deactivate_missing'] as $field) {
@@ -839,7 +964,7 @@ class AdminPiSourceController extends ModuleAdminController
         if ($data['field_mapping'] === false) {
             throw new InvalidArgumentException('Unable to encode field mapping: ' . json_last_error_msg());
         }
-        foreach (['json_url', 'json_file_path', 'filter_expression'] as $field) {
+        foreach (['filter_expression'] as $field) {
             if ($data[$field] === '') {
                 $data[$field] = null;
             }
@@ -934,7 +1059,7 @@ class AdminPiSourceController extends ModuleAdminController
         } catch (Throwable $error) {
             $this->sendJson(['error' => $error->getMessage()]);
         }
-        $file = preg_replace('/[^a-z0-9_-]+/', '_', (string) $source['technical_key']) . '.productimport.yml';
+        $file = preg_replace('/[^a-z0-9_-]+/', '_', (string) $source['technical_key']) . '.productimport.yaml';
         header('Content-Type: text/yaml; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $file . '"');
         header('X-Content-Type-Options: nosniff');
@@ -1052,7 +1177,7 @@ class AdminPiSourceController extends ModuleAdminController
         }
         $pasted = $_POST['source_text'] ?? '';
         if (!is_string($pasted) || trim($pasted) === '') {
-            throw new InvalidArgumentException('Choose a .productimport.yml file or paste its content.');
+            throw new InvalidArgumentException('Choose a .productimport.yaml file or paste its content.');
         }
 
         return $pasted;

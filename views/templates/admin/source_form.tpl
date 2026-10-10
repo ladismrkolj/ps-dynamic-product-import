@@ -19,7 +19,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     <button type="button" id="pi-refresh-feed" class="btn btn-default">Refresh feed</button>
     <span id="pi-feed-status" role="status" aria-live="polite">Feed not loaded.</span>
   </div>
-  <p class="help-block">The feed loads automatically when a URL or file path is set and whenever the feed settings change. It uses a copy fetched in the last 15 minutes; Refresh feed fetches it again. Imports always fetch the live feed.</p>
+  <p class="help-block">The feed loads automatically when a source is set and whenever the feed settings change. It uses a copy fetched in the last 15 minutes; Refresh feed fetches it again. For a saved source the load also records the categories and brands found. Imports always fetch the live feed.</p>
   <h3 id="pi-product-heading">PrestaShop product fields</h3>
   <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images expects a list of URLs.</p>
   <div id="pi-product-map"></div>
