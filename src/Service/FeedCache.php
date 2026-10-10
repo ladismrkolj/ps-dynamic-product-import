@@ -3,6 +3,7 @@
 namespace ProductImport\Service;
 
 use ProductImport\Service\Format\FeedFormats;
+use ProductImport\Service\Format\XmlFormat;
 
 /**
  * Disk cache of decoded feed items for the source editor only. Import runs fetch directly.
@@ -48,15 +49,35 @@ class FeedCache
      */
     public function get(array $source, bool $refresh = false): array
     {
+        return $this->load('feed-', $source, $refresh, $this->fetcher);
+    }
+
+    /**
+     * Candidate xml_item_path values of an XML source, cached under the same TTL. `items` holds the candidates.
+     * The key ignores xml_item_path: detection depends only on the format and location.
+     *
+     * @return array{items: array, fetched_at: int, age: int, cached: bool}
+     */
+    public function itemPaths(array $source, bool $refresh = false): array
+    {
+        $source = ['source_format' => 'xml', 'location' => $source['location'] ?? ''];
+
+        return $this->load('feed-paths-', $source, $refresh, static function (array $source): array {
+            return (new XmlFormat())->detectItemPaths(FeedFetcher::fetchBody($source));
+        });
+    }
+
+    private function load(string $prefix, array $source, bool $refresh, callable $fetcher): array
+    {
         $now = (int) ($this->clock)();
-        $file = $this->directory . 'feed-' . self::key($source) . '.json';
+        $file = $this->directory . $prefix . self::key($source) . '.json';
         if (!$refresh) {
             $hit = $this->read($file, $now);
             if ($hit !== null) {
                 return $hit;
             }
         }
-        $items = ($this->fetcher)($source);
+        $items = $fetcher($source);
         $this->write($file, $items, $now);
 
         return ['items' => $items, 'fetched_at' => $now, 'age' => 0, 'cached' => false];

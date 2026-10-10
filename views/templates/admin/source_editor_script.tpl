@@ -781,6 +781,60 @@
         (schema.truncated ? ' (field list capped at depth 6 / 1000 fields)' : '');
       if (data.discovery) document.dispatchEvent(new Event('pi-feed-discovered'));
     }
+    // ---- XML item path detection ----
+    var pathInput = form.querySelector('[name="xml_item_path"]');
+    var pathSelect = document.createElement('select');
+    var pathWrap = document.createElement('div');
+    var candidates = [];
+    var autoPath = null;
+    var reloadTimer = null;
+    (function () {
+      var label = document.createElement('label');
+      label.textContent = 'Detected ';
+      label.appendChild(pathSelect);
+      pathSelect.className = 'form-control';
+      pathSelect.id = 'pi-xml-item-paths';
+      pathWrap.className = 'pi-xml-item-paths';
+      pathWrap.style.marginTop = '6px';
+      pathWrap.hidden = true;
+      pathWrap.appendChild(label);
+      pathInput.parentElement.appendChild(pathWrap);
+    }());
+    function candidateLabel(candidate) {
+      var fields = candidate.fields.slice(0, 4).join(', ') + (candidate.fields.length > 4 ? ', …' : '');
+      return candidate.path + ' · ' + candidate.count + (candidate.approximate ? '+' : '') + (candidate.count === 1 ? ' item' : ' items') + ' (' + fields + ')';
+    }
+    function syncCandidate() {
+      var match = candidates.some(function (candidate) { return candidate.path === pathInput.value.trim(); });
+      pathSelect.value = match ? pathInput.value.trim() : '';
+    }
+    function renderCandidates(list) {
+      candidates = list;
+      pathSelect.replaceChildren();
+      var none = document.createElement('option');
+      none.value = '';
+      none.textContent = 'Choose…';
+      pathSelect.appendChild(none);
+      list.forEach(function (candidate, index) {
+        var option = document.createElement('option');
+        option.value = candidate.path;
+        option.textContent = candidateLabel(candidate) + (index === 0 && candidate.path === autoPath ? ' (detected)' : '');
+        pathSelect.appendChild(option);
+      });
+      pathWrap.hidden = list.length === 0;
+      syncCandidate();
+    }
+    function applyCandidates(data) {
+      autoPath = null;
+      if (pathInput.value.trim() === '' && data.item_path_candidates.length) {
+        autoPath = data.item_path_candidates[0].path;
+        pathInput.value = autoPath;
+        scheduleReload();
+      }
+      renderCandidates(data.item_path_candidates);
+      statusLine.textContent = data.item_path_candidates.length + ' item path candidates found';
+    }
+
     function loadFeed(refresh) {
       var button = document.getElementById('pi-refresh-feed');
       var seq = ++loadSeq;
@@ -789,6 +843,7 @@
       post(feedBody('inspect', refresh)).then(function (data) {
         if (seq !== loadSeq) return;
         if (data.error) statusLine.textContent = 'Could not load feed: ' + data.error;
+        else if (data.item_path_candidates) applyCandidates(data);
         else applySchema(data);
       })
         .catch(function (error) { if (seq === loadSeq) statusLine.textContent = 'Could not load feed: ' + error.message; })
@@ -989,18 +1044,32 @@
     renderAll();
     if (hasLocation()) loadFeed(false);
     else statusLine.textContent = NO_SOURCE;
-    var reloadTimer = null;
+    function scheduleReload() {
+      clearTimeout(reloadTimer);
+      reloadTimer = setTimeout(function () {
+        if (hasLocation()) loadFeed(false);
+        else statusLine.textContent = NO_SOURCE;
+      }, 700);
+    }
     LOCATION_FIELDS.forEach(function (name) {
       var field = form.querySelector('[name="' + name + '"]');
       ['input', 'change'].forEach(function (eventName) {
         field.addEventListener(eventName, function () {
-          clearTimeout(reloadTimer);
-          reloadTimer = setTimeout(function () {
-            if (hasLocation()) loadFeed(false);
-            else statusLine.textContent = NO_SOURCE;
-          }, 700);
+          if (name === 'location') {
+            // A path detected for the previous location is not valid for the new one: detect again.
+            if (pathInput.value === autoPath) pathInput.value = '';
+            autoPath = null;
+            renderCandidates([]);
+          }
+          if (name === 'xml_item_path') syncCandidate();
+          scheduleReload();
         });
       });
+    });
+    pathSelect.addEventListener('change', function () {
+      if (pathSelect.value === '') return;
+      pathInput.value = pathSelect.value;
+      scheduleReload();
     });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

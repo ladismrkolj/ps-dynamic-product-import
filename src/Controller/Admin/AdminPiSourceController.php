@@ -303,7 +303,17 @@ class AdminPiSourceController extends ModuleAdminController
     {
         try {
             [, $source] = $this->editorContext();
-            $feed = $this->cachedFeed($this->feedInput());
+            $input = $this->feedInput();
+            if (($input['source_format'] ?? null) === 'xml' && trim((string) ($input['xml_item_path'] ?? '')) === '') {
+                $paths = (new \ProductImport\Service\FeedCache())->itemPaths($input, ($_POST['refresh'] ?? '') === '1');
+                if ($paths['items'] === []) {
+                    throw new InvalidArgumentException('No repeating XML elements found; enter the item path manually.');
+                }
+                $this->sendJson(['item_path_candidates' => $paths['items'], 'cache' => $this->cacheInfo($paths)]);
+
+                return;
+            }
+            $feed = $this->cachedFeed($input);
             if ($feed['items'] === []) {
                 throw new InvalidArgumentException('Source feed must contain products.');
             }
@@ -883,7 +893,7 @@ class AdminPiSourceController extends ModuleAdminController
         $options = \ProductImport\Service\Format\FeedFormats::get($format)->options();
         foreach ($options as $option => $definition) {
             if ($definition['required'] && $data[$option] === '') {
-                throw new InvalidArgumentException($definition['label'] . ' is required for ' . $format . ' sources.');
+                throw new InvalidArgumentException($definition['label'] . ' is required for ' . $format . ' sources.' . ($option === 'xml_item_path' ? ' Choose the detected item path or enter one.' : ''));
             }
         }
         if (!isset($options['xml_item_path'])) {

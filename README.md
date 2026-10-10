@@ -134,7 +134,7 @@ The optional **Filter expression** on the General tab decides which items are im
 
 ### XML feeds
 
-Choose **Format: XML**, then set **XML item path** to the slash-separated path from the root to each repeating product element, for example `products/product` for `<catalog><products><product id="A1">…`. Items are converted to the same structure as JSON items, with flattened keys such as `["@attributes"].id`, `name`, `categories.category[0]`. `@attributes` and `@value` are synthetic keys the module adds during conversion. For example, `<dobava id="1">Na zalogi</dobava>` becomes `{"@attributes": {"id": "1"}, "@value": "Na zalogi"}`.
+Choose **Format: XML**. The **XML item path** is the slash-separated path from inside the root element to each repeating product element, for example `products/product` for `<catalog><products><product id="A1">…` (the root name is never part of the path). With the path empty the editor scans the feed and offers a **Detected** list such as `izdelki/izdelek · 1240 items (izdelekID, izdelekIme, …)`; the best candidate is filled in and marked *(detected)*, and picking another one reloads the fields. You can still type a path yourself, and a path is required to save. Detection streams the file without loading it whole, matches elements by local name (namespaces and prefixes are ignored) and stops counting after 200,000 elements (the count then shows a `+`). A candidate is an element that occurs at least twice at the same path and has child elements; if nothing repeats, the root's child elements are offered with count 1. Candidates are ranked by count, then by shallower path, except that a list nested inside a repeating element and repeating no more per parent than that element occurs (`images/image` inside every product) is listed after it. Results are cached for 15 minutes with the feed. Items are converted to the same structure as JSON items, with flattened keys such as `["@attributes"].id`, `name`, `categories.category[0]`. `@attributes` and `@value` are synthetic keys the module adds during conversion. For example, `<dobava id="1">Na zalogi</dobava>` becomes `{"@attributes": {"id": "1"}, "@value": "Na zalogi"}`.
 
 ### Cheat sheet
 
@@ -147,7 +147,7 @@ Choose **Format: XML**, then set **XML item path** to the slash-separated path f
 
 #### Recharge (XML)
 
-Format XML, item path `izdelki/izdelek`, identifier `izdelekID`.
+Format XML, item path `izdelki/izdelek` (offered as the first detected path), identifier `izdelekID`.
 
 | Field | Expression |
 |---|---|

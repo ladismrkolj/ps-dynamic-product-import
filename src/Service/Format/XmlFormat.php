@@ -19,6 +19,16 @@ class XmlFormat implements FeedFormat
         return ['xml_item_path' => ['label' => 'XML item path', 'required' => true]];
     }
 
+    /**
+     * Candidate item paths of an XML body, best first.
+     *
+     * @return list<array{path: string, count: int, fields: list<string>, approximate: bool}>
+     */
+    public function detectItemPaths(string $body): array
+    {
+        return XmlItemPathDetector::detect($body);
+    }
+
     public function parse(string $body, array $source): array
     {
         $itemPath = $source['xml_item_path'] ?? null;
