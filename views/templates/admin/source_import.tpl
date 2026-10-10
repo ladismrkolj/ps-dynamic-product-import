@@ -1,6 +1,6 @@
 <div id="pi-import-source" class="panel" data-url="{$pi_import_url|escape:'html':'UTF-8'}">
   <h3>Import source configuration</h3>
-  <p class="help-block">Upload a <code>.productimport.yml</code> file exported with <strong>Export</strong> (older <code>.json</code> exports work too). Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, suppliers and the language are matched by name; unmatched names are listed below.</p>
+  <p class="help-block">Upload a <code>.productimport.yml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, suppliers and the language are matched by name; unmatched names are listed below.</p>
   <div class="form-group">
     <label>What to do with the file</label>
     {if $pi_import_can_create}
@@ -20,7 +20,7 @@
   </div>
   <div class="form-group">
     <label for="pi-import-file">Export file</label>
-    <input type="file" id="pi-import-file" accept=".yml,.yaml,.json,text/yaml,application/json">
+    <input type="file" id="pi-import-file" accept=".yml,.yaml,text/yaml">
   </div>
   <div class="form-group">
     <label for="pi-import-text">&hellip; or paste the exported YAML</label>

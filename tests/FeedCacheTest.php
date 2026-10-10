@@ -33,7 +33,7 @@ class FeedCacheTest extends TestCase
         }, function () use (&$now) {
             return $now;
         });
-        $source = ['json_url' => 'https://example.test/feed.json'];
+        $source = ['source_format' => 'json', 'json_url' => 'https://example.test/feed.json'];
         $first = $cache->get($source);
         self::assertFalse($first['cached']);
         $now = 1000 + 60;
@@ -57,14 +57,13 @@ class FeedCacheTest extends TestCase
         }, static function () {
             return 5;
         });
-        $a = ['json_url' => 'https://example.test/a.json'];
+        $a = ['source_format' => 'json', 'json_url' => 'https://example.test/a.json'];
         $cache->get($a);
         self::assertSame(2, $cache->get($a, true)['items'][0]['n']);
         self::assertTrue($cache->get($a)['cached']);
-        self::assertFalse($cache->get(['json_url' => 'https://example.test/b.json'])['cached']);
+        self::assertFalse($cache->get(['source_format' => 'json', 'json_url' => 'https://example.test/b.json'])['cached']);
         self::assertFalse($cache->get($a + ['source_format' => 'xml', 'xml_item_path' => 'a/b'])['cached']);
         self::assertNotSame(FeedCache::key($a), FeedCache::key($a + ['json_file_path' => '/tmp/x']));
-        self::assertSame(FeedCache::key($a), FeedCache::key($a + ['source_format' => 'json']));
     }
 
     public function testCorruptCacheFileIsRefetched(): void
@@ -74,7 +73,7 @@ class FeedCacheTest extends TestCase
         }, static function () {
             return 5;
         });
-        $source = ['json_file_path' => '/tmp/feed.json'];
+        $source = ['source_format' => 'json', 'json_file_path' => '/tmp/feed.json'];
         $cache->get($source);
         file_put_contents($this->directory . '/feed-' . FeedCache::key($source) . '.json', '{broken');
         self::assertFalse($cache->get($source)['cached']);

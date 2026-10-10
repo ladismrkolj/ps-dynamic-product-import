@@ -2,7 +2,7 @@
 
 use ProductImport\Repository\ImportRunRepository;
 
-// PS9 removed the legacy l()/translation fallback from AdminController; it
+// PS9 removed the l()/translation fallback from AdminController; it
 // only exists on ModuleAdminController now.
 class AdminPiRunLogController extends ModuleAdminController
 {
@@ -32,9 +32,8 @@ class AdminPiRunLogController extends ModuleAdminController
         $repository = new ImportRunRepository();
         $idSource = (int) Tools::getValue('id_source');
         $rows = $idSource > 0 ? $repository->findRecent($idSource) : $repository->findAll();
-        // HelperList text columns are not consistently autoescaped across legacy themes.
+        // HelperList text columns are not consistently autoescaped.
         foreach ($rows as &$row) {
-            $row['triggered_by'] = $row['triggered_by'] ?: 'unknown';
             foreach (['source_name', 'status', 'triggered_by', 'error_log'] as $field) {
                 $row[$field] = Tools::safeOutput((string) ($row[$field] ?? ''));
             }

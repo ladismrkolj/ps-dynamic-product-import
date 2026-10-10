@@ -33,7 +33,7 @@ class PreviewBuilderTest extends TestCase
             }
         };
         $manufacturers = new class () extends ManufacturerResolver {
-            public function resolve(?string $name, int $idSource, bool $commit = true, ?int $defaultId = null)
+            public function resolve(?string $name, int $idSource, bool $commit = true, ?int $defaultId = null): int|array|null
             {
                 TestCase::assertSame(24, $defaultId);
                 TestCase::assertSame(7, $idSource);

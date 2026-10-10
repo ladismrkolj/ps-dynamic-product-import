@@ -2,8 +2,8 @@
 
 use ProductImport\Repository\SourceRepository;
 
-// Legacy controller classes must be global for PrestaShop's tab dispatcher.
-// PS9 removed the legacy l()/translation fallback from AdminController; it
+// Controller classes must be global for PrestaShop's tab dispatcher.
+// PS9 removed the l()/translation fallback from AdminController; it
 // only exists on ModuleAdminController now.
 class AdminPiSourceController extends ModuleAdminController
 {
@@ -139,8 +139,8 @@ class AdminPiSourceController extends ModuleAdminController
             foreach ($rows as $row) {
                 $runs[] = ['id_run' => (int) $row['id_run'], 'id_source' => (int) $row['id_source'],
                     'name' => (string) ($row['source_name'] ?? ''), 'status' => $row['status'],
-                    'triggered_by' => $row['triggered_by'] ?? null,
-                    'counts' => ['created' => (int) $row['created_count'], 'updated' => (int) $row['updated_count'], 'unchanged' => (int) ($row['unchanged_count'] ?? 0),
+                    'triggered_by' => $row['triggered_by'],
+                    'counts' => ['created' => (int) $row['created_count'], 'updated' => (int) $row['updated_count'], 'unchanged' => (int) $row['unchanged_count'],
                         'skipped' => (int) $row['skipped_count'], 'failed' => (int) $row['failed_count']],
                     'error_log' => (string) ($row['error_log'] ?? '')];
             }

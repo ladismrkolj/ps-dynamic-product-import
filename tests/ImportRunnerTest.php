@@ -143,7 +143,7 @@ class ImportRunnerTest extends TestCase
             }
         };
         $manufacturers = new class () extends ManufacturerResolver {
-            public function resolve(?string $name, int $idSource, bool $commit = true, ?int $defaultId = null)
+            public function resolve(?string $name, int $idSource, bool $commit = true, ?int $defaultId = null): int|array|null
             {
                 TestCase::assertSame(24, $defaultId);
                 TestCase::assertSame(1, $idSource);
@@ -202,7 +202,7 @@ class ImportRunnerTest extends TestCase
     private function source(array $overrides = []): array
     {
         return $overrides + ['id_source' => 1, 'default_id_category' => 23, 'default_id_manufacturer' => 24, 'active' => 1, 'identifier_field' => 'id', 'id_lang_default' => 1,
-            'field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]'], 'filter_expression' => 'path(fields, "skip") != true', 'deactivate_missing' => false];
+            'field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]'], 'filter_expression' => 'path(fields, "skip") != true', 'deactivate_missing' => false, 'consecutive_empty_count' => 0, 'source_format' => 'json'];
     }
 
     public function testMixedItemsAndCleanupOnlyStaleLinks(): void

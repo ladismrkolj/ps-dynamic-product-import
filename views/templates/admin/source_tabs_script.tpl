@@ -1,6 +1,6 @@
 {literal}
 <style>
-/* Scoped fallback also keeps these panes usable if the legacy tab plugin is absent. */
+/* Scoped fallback also keeps these panes usable if the Bootstrap tab plugin is absent. */
 #pi-source-tabs > .tab-content > .tab-pane { display: none; }
 #pi-source-tabs > .tab-content > .tab-pane.active { display: block; }
 #pi-source-tabs > .tab-content { padding-top: 16px; }

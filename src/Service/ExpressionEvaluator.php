@@ -24,8 +24,7 @@ class ExpressionEvaluator
         }
     }
 
-    /** @return mixed PHP 7.2-compatible equivalent of a mixed return type. */
-    public function evaluate(string $expression, array $variables)
+    public function evaluate(string $expression, array $variables): mixed
     {
         // Feed items omit fields freely (no variants, fewer images): a missing key is null, not a warning.
         set_error_handler(static function (int $severity, string $message): bool {

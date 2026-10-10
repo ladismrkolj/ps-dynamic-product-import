@@ -30,7 +30,7 @@ class FeedCache
 
     public static function key(array $source): string
     {
-        $format = ($source['source_format'] ?? 'json') === 'xml' ? 'xml' : 'json';
+        $format = $source['source_format'] === 'xml' ? 'xml' : 'json';
 
         return sha1(implode('|', [$format, (string) ($source['json_url'] ?? ''), (string) ($source['json_file_path'] ?? ''), (string) ($source['xml_item_path'] ?? '')]));
     }

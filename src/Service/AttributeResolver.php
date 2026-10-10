@@ -61,12 +61,7 @@ class AttributeResolver
             return ['id_attribute_group' => $idGroup, 'id_attribute' => $idAttribute ?: null, 'create_group' => false, 'create_value' => !$idAttribute];
         }
         if (!$idAttribute) {
-            // PS 8 renamed Attribute to ProductAttribute to avoid PHP 8's built-in Attribute.
-            $class = class_exists('ProductAttribute') ? 'ProductAttribute' : 'Attribute';
-            if (!is_subclass_of($class, 'ObjectModel')) {
-                throw new \RuntimeException('No PrestaShop attribute ObjectModel is available.');
-            }
-            $attribute = new $class();
+            $attribute = new \ProductAttribute();
             $attribute->id_attribute_group = $idGroup;
             foreach (\Language::getLanguages(false) as $language) {
                 $attribute->name[(int) $language['id_lang']] = $valueName;

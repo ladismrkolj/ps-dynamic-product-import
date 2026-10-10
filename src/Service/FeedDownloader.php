@@ -96,32 +96,25 @@ class FeedDownloader
         }
         $body = '';
         $tooLarge = false;
-        try {
-            $protocolOption = defined('CURLOPT_PROTOCOLS_STR') ? constant('CURLOPT_PROTOCOLS_STR') : CURLOPT_PROTOCOLS;
-            $protocolValue = defined('CURLOPT_PROTOCOLS_STR') ? 'http,https' : CURLPROTO_HTTP | CURLPROTO_HTTPS;
-            curl_setopt_array($handle, [
-                CURLOPT_CONNECTTIMEOUT => 30,
-                CURLOPT_TIMEOUT => 120,
-                $protocolOption => $protocolValue,
-                // Returning a short count makes cURL abort, so the cap holds while downloading.
-                CURLOPT_WRITEFUNCTION => static function ($curl, string $chunk) use (&$body, &$tooLarge, $maxBytes): int {
-                    if (strlen($body) + strlen($chunk) > $maxBytes) {
-                        $tooLarge = true;
-                        return 0;
-                    }
-                    $body .= $chunk;
-                    return strlen($chunk);
-                },
-            ]);
-            $ok = curl_exec($handle);
-            $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
+        $protocolOption = defined('CURLOPT_PROTOCOLS_STR') ? constant('CURLOPT_PROTOCOLS_STR') : CURLOPT_PROTOCOLS;
+        $protocolValue = defined('CURLOPT_PROTOCOLS_STR') ? 'http,https' : CURLPROTO_HTTP | CURLPROTO_HTTPS;
+        curl_setopt_array($handle, [
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_TIMEOUT => 120,
+            $protocolOption => $protocolValue,
+            // Returning a short count makes cURL abort, so the cap holds while downloading.
+            CURLOPT_WRITEFUNCTION => static function ($curl, string $chunk) use (&$body, &$tooLarge, $maxBytes): int {
+                if (strlen($body) + strlen($chunk) > $maxBytes) {
+                    $tooLarge = true;
+                    return 0;
+                }
+                $body .= $chunk;
+                return strlen($chunk);
+            },
+        ]);
+        $ok = curl_exec($handle);
+        $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
 
-            return ['status' => $status, 'body' => $body, 'error' => $ok === false && !$tooLarge ? curl_error($handle) : null, 'too_large' => $tooLarge];
-        } finally {
-            // PHP 8 releases CurlHandle automatically; PHP 7 still uses a resource.
-            if (is_resource($handle)) {
-                curl_close($handle);
-            }
-        }
+        return ['status' => $status, 'body' => $body, 'error' => $ok === false && !$tooLarge ? curl_error($handle) : null, 'too_large' => $tooLarge];
     }
 }

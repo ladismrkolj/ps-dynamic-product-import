@@ -338,26 +338,6 @@ class SourceConfigTransferTest extends TestCase
         self::assertStringContainsString('and fields.price > 1', $parsed['source']['filter_expression']);
     }
 
-    public function testOlderJsonExportStillParses(): void
-    {
-        $json = json_encode([
-            'format' => 'productimport-source', 'version' => 1,
-            'source' => ['name' => 'N', 'technical_key' => 'n', 'json_url' => 'https://example.com/f.json', 'json_file_path' => null, 'source_format' => 'json', 'xml_item_path' => null,
-                'identifier_field' => 'id', 'filter_expression' => null, 'field_mapping' => ['name' => 'fields.t'], 'variant_mapping' => null, 'active' => true, 'deactivate_missing' => false,
-                'language' => 'sl', 'root_category' => ['Home', 'Sport'], 'default_category' => null, 'default_manufacturer' => null, 'supplier' => null],
-            'category_mappings' => [['source_path' => ['Water', 'Boards'], 'category' => ['Home', 'Sport', 'Boards']]],
-            'brand_mappings' => [['source_name' => 'Duotone', 'manufacturer' => 'Duotone']],
-        ]);
-        $transfer = new SourceConfigTransfer();
-        $result = $transfer->resolve($transfer->parse($json), self::importLookups(), static function () {
-            return false;
-        });
-        self::assertSame([], $result['warnings']);
-        self::assertSame(5, $result['source']['root_category_id']);
-        self::assertSame([['source_path' => ['Water', 'Boards'], 'id_category' => 6]], $result['category_mappings']);
-        self::assertSame([['source_name' => 'Duotone', 'id_manufacturer' => 9]], $result['brand_mappings']);
-    }
-
     public function testPathSplitAndJoinKeepSurroundingSpaces(): void
     {
         self::assertSame(['Home', 'Sport'], SourceConfigTransfer::splitPath('Home > Sport'));

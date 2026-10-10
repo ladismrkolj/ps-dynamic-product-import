@@ -24,8 +24,8 @@ class ManufacturerResolver
         }
     }
 
-    /** @return int|null|array Commit: ID/null; preview: {name, id_manufacturer, auto_create}. */
-    public function resolve(?string $name, int $idSource, bool $commit = true, ?int $defaultId = null)
+    /** Commit: ID/null; preview: {name, id_manufacturer, auto_create}. */
+    public function resolve(?string $name, int $idSource, bool $commit = true, ?int $defaultId = null): int|array|null
     {
         if ($name === null || trim($name) === '') {
             return $commit ? null : ['name' => null, 'id_manufacturer' => null, 'auto_create' => false];
@@ -49,8 +49,7 @@ class ManufacturerResolver
         return $idSource . '|' . ($defaultId ?? 'n') . '|' . ($commit ? 'c' : 'p') . '|' . $name;
     }
 
-    /** @return int|array */
-    private function lookup(string $name, int $idSource, bool $commit, ?int $defaultId)
+    private function lookup(string $name, int $idSource, bool $commit, ?int $defaultId): int|array
     {
         $override = $this->mappings->findOverride($idSource, $name);
         if ($override !== null && $override['id_manufacturer'] !== null) {

@@ -6,8 +6,7 @@ use Symfony\Component\Yaml\Exception\ParseException;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Portable source configuration (YAML): builds the export document, validates an uploaded one (YAML or the
- * older JSON exports) and resolves its names to the IDs of the importing store. Pure logic; every store lookup is injected.
+ * Portable source configuration (YAML): builds the export document, validates an uploaded one and resolves its names to the IDs of the importing store. Pure logic; every store lookup is injected.
  */
 class SourceConfigTransfer
 {
@@ -103,7 +102,7 @@ class SourceConfigTransfer
     }
 
     /**
-     * Strictly validates an uploaded document (YAML, or the older JSON exports) and returns its normalised form.
+     * Strictly validates an uploaded document (YAML) and returns its normalised form.
      *
      * @param bool $partial overwrite mode: every source setting is optional and only the present ones are returned
      *
@@ -126,7 +125,7 @@ class SourceConfigTransfer
             throw new \InvalidArgumentException('The file is not valid YAML: ' . $error->getMessage());
         }
         if (!is_array($document) || ($document !== [] && array_is_list($document))) {
-            throw new \InvalidArgumentException('The file must contain a YAML (or JSON) mapping with "format", "version" and "source".');
+            throw new \InvalidArgumentException('The file must contain a YAML mapping with "format", "version" and "source".');
         }
         if (($document['format'] ?? null) !== self::FORMAT) {
             throw new \InvalidArgumentException('This is not a Product Import source export (format must be "' . self::FORMAT . '").');
@@ -154,7 +153,7 @@ class SourceConfigTransfer
             if (!is_array($row)) {
                 throw new \InvalidArgumentException('Every category mapping must be a mapping with "feed" and "category".');
             }
-            $path = self::optionalPath($row['feed'] ?? $row['source_path'] ?? null, 'category_mappings[].feed');
+            $path = self::optionalPath($row['feed'] ?? null, 'category_mappings[].feed');
             if ($path === null) {
                 throw new \InvalidArgumentException('Every category mapping needs a "feed" category path.');
             }
@@ -174,11 +173,11 @@ class SourceConfigTransfer
             if (!is_array($row)) {
                 throw new \InvalidArgumentException('Every brand mapping must be a mapping with "feed" and "brand".');
             }
-            $name = $row['feed'] ?? $row['source_name'] ?? null;
+            $name = $row['feed'] ?? null;
             if (!is_string($name) || $name === '' || mb_strlen($name) > 191) {
                 throw new \InvalidArgumentException('Every brand mapping needs a "feed" brand name of 1 to 191 characters.');
             }
-            $manufacturer = self::optionalString($row, array_key_exists('brand', $row) ? 'brand' : 'manufacturer');
+            $manufacturer = self::optionalString($row, 'brand');
             if (!isset($seen[$name])) {
                 $seen[$name] = true;
                 $brands[] = ['source_name' => $name, 'manufacturer' => $manufacturer];

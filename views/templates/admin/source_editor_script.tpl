@@ -1,5 +1,9 @@
 {literal}
 <style>
+#pi-reference-details > summary.pi-ref-toggle, #pi-reference-toggle { list-style: none; display: inline-block; cursor: pointer; margin-bottom: 8px; }
+#pi-reference-toggle::-webkit-details-marker { display: none; }
+#pi-reference-toggle .pi-ref-caret { vertical-align: middle; font-size: 20px; line-height: 1; transition: transform .15s; }
+#pi-reference-details[open] > #pi-reference-toggle .pi-ref-caret { transform: rotate(180deg); }
 #pi-grid-root .pi-grid-toolbar { margin-bottom: 8px; }
 #pi-grid-root .pi-grid-toolbar > * { margin-right: 8px; vertical-align: middle; }
 #pi-grid-root table td, #pi-grid-root table th { vertical-align: top; }
@@ -118,6 +122,8 @@
     var statusLine = document.getElementById('pi-feed-status');
     var emptyMessage = document.getElementById('pi-reference-empty');
     var searchInput = document.getElementById('pi-feed-search');
+    var referenceDetails = document.getElementById('pi-reference-details');
+    if (referenceDetails) referenceDetails.addEventListener('toggle', updateReferenceToggle);
     var variantsList = document.getElementById('pi-variants-list');
     var variantsCustom = document.getElementById('pi-variants-custom');
     var variantMappings = document.getElementById('pi-variant-mappings');
@@ -530,7 +536,7 @@
       });
       if (vlist.mode === 'custom') variantsCustom.value = expression;
     }
-    // Rows are read with the old schema, then re-attached to the new one.
+    // Editor rows are read against the previous schema, then re-attached to the new one.
     function reconcile(newSchema) {
       var state = {mapping: pEditor.state(), variants: variantsExpression(), fields: vfEditor.state(), attributes: vaEditor.state()};
       schema = newSchema;
@@ -541,7 +547,13 @@
     }
 
     // ---- Rendering ----
+    function updateReferenceToggle() {
+      var details = document.getElementById('pi-reference-details');
+      var label = document.getElementById('pi-reference-toggle-label');
+      if (details && label) label.textContent = (details.open ? 'Hide' : 'Show') + ' feed fields (' + schema.columns.length + ')';
+    }
     function renderReference() {
+      updateReferenceToggle();
       referenceBody.replaceChildren();
       var text = searchInput.value.trim().toLowerCase();
       var shown = 0;

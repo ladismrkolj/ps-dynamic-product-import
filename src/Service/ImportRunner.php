@@ -47,7 +47,7 @@ class ImportRunner
         $skipCleanup = false;
         $forcedFailure = false;
         if (!empty($source['deactivate_missing'])) {
-            $previousEmptyStreak = (int) ($source['consecutive_empty_count'] ?? 0);
+            $previousEmptyStreak = (int) $source['consecutive_empty_count'];
             if ($items === [] && $previousEmptyStreak === 0) {
                 $this->sourceRepository->setConsecutiveEmptyCount($idSource, 1);
                 $skipCleanup = true;
