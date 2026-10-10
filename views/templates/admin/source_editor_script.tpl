@@ -153,7 +153,7 @@
     function hasLocation() {
       return form.querySelector('[name="location"]').value.trim() !== '';
     }
-    function addSampler(cell, textarea) {
+    function addSampler(cell, textarea, variantRows) {
       var controls = document.createElement('div');
       var label = document.createElement('label');
       label.textContent = 'Sample size ';
@@ -182,10 +182,16 @@
           output.textContent = 'Write an expression first';
           return;
         }
+        var variantsExpr = variantRows ? variantsExpression().trim() : '';
+        if (variantRows && variantsExpr === '') {
+          output.textContent = 'Choose a variants list first';
+          return;
+        }
         button.disabled = true;
         button.textContent = 'Sampling…';
         var body = feedBody('sampleValues', false);
         body.set('expression', textarea.value);
+        if (variantRows) body.set('variants_expression', variantsExpr);
         body.set('sample_size', size.value);
         post(body).then(function (data) {
           if (data.error) {
@@ -193,7 +199,8 @@
             return;
           }
           var status = document.createElement('p');
-          status.textContent = data.items_scanned + ' items scanned, ' + data.distinct_total + ' distinct values' +
+          status.textContent = (data.variants_scanned === undefined ? data.items_scanned + ' items scanned, '
+            : data.variants_scanned + ' variants from ' + data.items_scanned + ' products scanned, ') + data.distinct_total + ' distinct values' +
             (data.truncated ? ' (showing first 50)' : '') + ', ' + data.errors.count + ' errors';
           output.appendChild(status);
           var table = document.createElement('table');
@@ -492,7 +499,7 @@
         row.box.appendChild(row.textarea);
         row.helper = insertHelper(row.textarea, cfg.inserts);
         row.box.appendChild(row.helper.element);
-        addSampler(row.box, row.textarea);
+        addSampler(row.box, row.textarea, !!cfg.variantRows);
         cell.appendChild(row.box);
         if (cfg.referencePattern && spec.target === 'reference') addPattern(row, cell);
         row.select.addEventListener('change', function () {
@@ -547,11 +554,11 @@
     });
     var vfEditor = mapEditor({
       container: document.getElementById('pi-variant-field-map'), heading: 'Combination field', targets: VARIANT_TARGETS,
-      options: variantOptions, inserts: variantInserts, placeholder: 'Combination field'
+      options: variantOptions, inserts: variantInserts, placeholder: 'Combination field', variantRows: true
     });
     var vaEditor = mapEditor({
       container: document.getElementById('pi-variant-attribute-map'), heading: 'Attribute', targets: [],
-      options: variantOptions, inserts: variantInserts, addLabel: '+ Add attribute', placeholder: 'Attribute name, e.g. Size', minRows: 1
+      options: variantOptions, inserts: variantInserts, addLabel: '+ Add attribute', placeholder: 'Attribute name, e.g. Size', minRows: 1, variantRows: true
     });
 
     // ---- Filter expression helper ----

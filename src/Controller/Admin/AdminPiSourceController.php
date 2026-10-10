@@ -400,8 +400,15 @@ class AdminPiSourceController extends ModuleAdminController
             }
             $rawSize = $_POST['sample_size'] ?? null;
             $size = is_string($rawSize) && ctype_digit($rawSize) && (int) $rawSize > 0 ? min(500, (int) $rawSize) : 50;
+            $variantsExpression = $_POST['variants_expression'] ?? null;
+            if ($variantsExpression !== null && (!is_string($variantsExpression) || trim($variantsExpression) === '')) {
+                throw new InvalidArgumentException('Choose a variants list first.');
+            }
             $items = $this->cachedFeed($this->feedInput())['items'];
-            $result = (new \ProductImport\Service\ValueSampler())->sample(array_slice($items, 0, $size), $expression);
+            $sampler = new \ProductImport\Service\ValueSampler();
+            $result = $variantsExpression === null
+                ? $sampler->sample(array_slice($items, 0, $size), $expression)
+                : $sampler->sample($items, $expression, trim($variantsExpression), $size);
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }
