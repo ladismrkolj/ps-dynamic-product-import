@@ -5,6 +5,8 @@ namespace ProductImport\Service;
 class ManufacturerResolver
 {
     private \ProductImport\Repository\ManufacturerMappingRepository $mappings;
+    /** @var array<string, int|null|array> Per-instance (per-run) results; commit mode is part of the key. */
+    private array $cache = [];
 
     public function __construct(?\ProductImport\Repository\ManufacturerMappingRepository $mappings = null)
     {
@@ -29,6 +31,27 @@ class ManufacturerResolver
             return $commit ? null : ['name' => null, 'id_manufacturer' => null, 'auto_create' => false];
         }
         $name = trim($name);
+        $key = self::cacheKey($idSource, $defaultId, $commit, $name);
+        if (array_key_exists($key, $this->cache)) {
+            return $this->cache[$key];
+        }
+        $result = $this->lookup($name, $idSource, $commit, $defaultId);
+        // A preview miss (manufacturer not yet created) can go stale once a commit creates it.
+        if ($commit || (is_array($result) && $result['id_manufacturer'] !== null)) {
+            $this->cache[$key] = $result;
+        }
+
+        return $result;
+    }
+
+    public static function cacheKey(int $idSource, ?int $defaultId, bool $commit, string $name): string
+    {
+        return $idSource . '|' . ($defaultId ?? 'n') . '|' . ($commit ? 'c' : 'p') . '|' . $name;
+    }
+
+    /** @return int|array */
+    private function lookup(string $name, int $idSource, bool $commit, ?int $defaultId)
+    {
         $override = $this->mappings->findOverride($idSource, $name);
         if ($override !== null && $override['id_manufacturer'] !== null) {
             $id = (int) $override['id_manufacturer'];

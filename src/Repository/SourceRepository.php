@@ -75,6 +75,25 @@ class SourceRepository
         return (bool) \Db::getInstance()->execute('DELETE FROM `' . _DB_PREFIX_ . 'pi_source` WHERE `id_source` = ' . (int) $idSource);
     }
 
+    /** @return string|null supplier name by ID */
+    public function findSupplierName(int $idSupplier): ?string
+    {
+        $name = \Db::getInstance()->getValue('SELECT `name` FROM `' . _DB_PREFIX_ . 'supplier` WHERE `id_supplier` = ' . (int) $idSupplier);
+
+        return $name === false || $name === null || $name === '' ? null : (string) $name;
+    }
+
+    /** @return array<int,string> id_supplier => name for names equal to $name (collation-insensitive; callers compare exactly) */
+    public function findSupplierNamesLike(string $name): array
+    {
+        $rows = \Db::getInstance()->executeS('SELECT `id_supplier`, `name` FROM `' . _DB_PREFIX_ . "supplier` WHERE `name` = '" . pSQL($name) . "'");
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to look up suppliers.');
+        }
+
+        return array_column($rows, 'name', 'id_supplier');
+    }
+
     private function assignments(array $data): array
     {
         $assignments = [];

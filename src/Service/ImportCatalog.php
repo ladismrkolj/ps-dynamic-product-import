@@ -10,13 +10,18 @@ class ImportCatalog
         return (float) $this->product($idProduct)->price;
     }
 
-    public function deactivateProduct(int $idProduct): void
+    /** Returns false, leaving the product alone, when its active flag differs from what the import last wrote. */
+    public function deactivateProduct(int $idProduct, ?bool $importedActive = null): bool
     {
         $product = $this->product($idProduct);
+        if ($importedActive !== null && (bool) $product->active !== $importedActive) {
+            return false;
+        }
         $product->active = false;
         if (!$product->save()) {
             throw new \RuntimeException('Unable to deactivate product ' . $idProduct);
         }
+        return true;
     }
 
     public function zeroCombination(int $idProduct, int $idCombination): void

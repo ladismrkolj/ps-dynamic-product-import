@@ -14,54 +14,42 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
   <div class="tab-content">
     <div id="pi-general" class="tab-pane active" role="tabpanel" aria-labelledby="pi-general-link"></div>
     <div id="pi-products" class="tab-pane" role="tabpanel" aria-labelledby="pi-products-link">
-<div id="pi-fixed-mappings">
-  <p class="help-block">Choose a source field, or choose Custom expression for formulas. Blank rows are not saved.</p>
-  <p class="help-block">category_paths accepts a single category name, such as fields['category'], or a breadcrumb chain or list of paths, such as [fields['breadcrumbs']]. Hierarchy matters only for auto-create; set category overrides on the Categories tab. images expects a list of URLs; main_image defaults to its first entry. Container fields are included in the selectors.</p>
-  {foreach from=$pi_fixed_rows item=row}
-  <div class="panel pi-fixed-row" data-target="{$row.target|escape:'html':'UTF-8'}">
-    <label for="pi-source-{$row.target|escape:'html':'UTF-8'}">{$row.target|escape:'html':'UTF-8'}</label>
-    <span class="badge">{$row.badge|escape:'html':'UTF-8'}</span>
-    <input class="pi-fixed-target" type="hidden" name="field_mapping_target[]" value="{if $row.expression != ''}{$row.target|escape:'html':'UTF-8'}{/if}">
-    <select id="pi-source-{$row.target|escape:'html':'UTF-8'}" class="pi-source-field" aria-label="Source field for {$row.target|escape:'html':'UTF-8'}"></select>
-    <div class="pi-custom-controls">
-      <textarea name="field_mapping_expression[]" rows="3" aria-label="Custom expression for {$row.target|escape:'html':'UTF-8'}">{$row.expression|escape:'html':'UTF-8'}</textarea>
-      <select class="pi-insert-field" aria-label="Field to insert"><option value="">Run Test source above to populate</option></select>
-      <button type="button" class="btn btn-default pi-insert-button" disabled>+ Insert field at cursor</button>
-    </div>
+<div id="pi-grid-root" data-state="{$pi_state_json|escape:'html':'UTF-8'}">
+  <div class="pi-grid-toolbar">
+    <button type="button" id="pi-refresh-feed" class="btn btn-default">Refresh feed</button>
+    <span id="pi-feed-status" role="status" aria-live="polite">Feed not loaded.</span>
   </div>
-  {/foreach}
+  <p class="help-block">The feed loads automatically when a URL or file path is set and whenever the feed settings change. It uses a copy fetched in the last 15 minutes; Refresh feed fetches it again. Imports always fetch the live feed.</p>
+  <h3 id="pi-product-heading">PrestaShop product fields</h3>
+  <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images expects a list of URLs.</p>
+  <div id="pi-product-map"></div>
+  <section id="pi-variants">
+    <h3>Variants (optional)</h3>
+    <p class="help-block">A variants list contains one entry per combination, such as <code>variants</code>. Map PrestaShop combination fields and named attributes such as Size to its sub-fields (or to product fields). At least one attribute and a reference field are required when variants are enabled. Variant price is absolute; active=false sets zero stock.</p>
+    <label for="pi-variants-list">Variants list</label>
+    <select id="pi-variants-list"></select>
+    <input id="pi-variants-custom" type="text" value="" aria-label="Custom variants expression" style="display:none">
+    <div id="pi-variant-mappings" style="display:none">
+      <h4>PrestaShop combination fields</h4>
+      <p class="help-block">Formulas use <code>variant</code> for one entry, for example <code>path(variant, 'size')</code>, and <code>fields</code> for the product.</p>
+      <div id="pi-variant-field-map"></div>
+      <h4>Attributes</h4>
+      <div id="pi-variant-attribute-map"></div>
+    </div>
+  </section>
+  <h3 id="pi-reference-heading">Feed fields (reference)</h3>
+  <details id="pi-reference-details">
+    <summary>Show every field found in the feed</summary>
+    <label for="pi-feed-search" class="sr-only">Search feed fields</label>
+    <input type="search" id="pi-feed-search" placeholder="Search feed fields" autocomplete="off">
+    <table id="pi-reference" class="table table-condensed" aria-labelledby="pi-reference-heading">
+      <thead><tr><th scope="col">Feed field</th><th scope="col">Present in</th><th scope="col">Type</th><th scope="col">Samples</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p id="pi-reference-empty" class="help-block"></p>
+  </details>
+  <div id="pi-generated" hidden></div>
 </div>
-<h3>Custom fields</h3>
-<p class="help-block">Use custom rows for targets outside the fixed list above.</p>
-{include file='./mapping_rows.tpl' rows=$pi_mapping_rows prefix='field_mapping' heading='Custom target field' add_label='+ Add custom field'}
-<section id="pi-variants">
-  <h3>Variants (optional)</h3>
-  <p class="help-block">A variants list contains one entry per combination, such as <code>variants</code>. Attributes describe each entry, for example attribute Size mapped to <code>variant['size']</code>.</p>
-  <label for="pi-variants-list">Variants list</label>
-  <select id="pi-variants-list"></select>
-  <input id="pi-variants-expression" type="text" name="variants_expression" value="{$pi_variants_expression|escape:'html':'UTF-8'}" aria-label="Custom variants expression">
-  <div id="pi-variant-mappings">
-    <p class="help-block">At least one attribute and a reference field are required. Variant price is absolute; active=false sets zero stock.</p>
-    <h4>Variant fields</h4>
-    {foreach from=['reference', 'ean13', 'price', 'quantity', 'active', 'image'] item=target}
-    <div class="panel pi-variant-row" data-target="{$target|escape:'html':'UTF-8'}">
-      <label>{$target|escape:'html':'UTF-8'}</label>{if $target == 'reference'} <span class="badge">Required for variants</span>{/if}
-      <input class="pi-variant-target" type="hidden" name="variant_field_target[]" value="{$target|escape:'html':'UTF-8'}">
-      <select class="pi-mapping-select" aria-label="Source for variant {$target|escape:'html':'UTF-8'}"></select>
-      <textarea name="variant_field_expression[]" rows="3" aria-label="Custom variant {$target|escape:'html':'UTF-8'} expression">{foreach from=$pi_variant_field_rows item=row}{if $row.target == $target}{$row.expression|escape:'html':'UTF-8'}{/if}{/foreach}</textarea>
-    </div>
-    {/foreach}
-    <h4>Attributes</h4>
-    <div id="pi-attribute-rows">
-    {foreach from=$pi_attribute_rows item=row}
-      <div class="panel pi-attribute-row"><input type="text" name="variant_attribute_target[]" value="{$row.target|escape:'html':'UTF-8'}" placeholder="Attribute name, e.g. Size" aria-label="Attribute name"><select class="pi-mapping-select" aria-label="Attribute source"></select><textarea name="variant_attribute_expression[]" rows="3" aria-label="Custom attribute expression">{$row.expression|escape:'html':'UTF-8'}</textarea><button type="button" class="btn btn-default pi-remove-attribute">Remove</button></div>
-    {foreachelse}
-      <div class="panel pi-attribute-row"><input type="text" name="variant_attribute_target[]" placeholder="Attribute name, e.g. Size" aria-label="Attribute name"><select class="pi-mapping-select" aria-label="Attribute source"></select><textarea name="variant_attribute_expression[]" rows="3" aria-label="Custom attribute expression"></textarea><button type="button" class="btn btn-default pi-remove-attribute">Remove</button></div>
-    {/foreach}
-    </div>
-    <button type="button" id="pi-add-attribute" class="btn btn-default">+ Add attribute</button>
-  </div>
-</section>
     </div>
     <div id="pi-categories" class="tab-pane" role="tabpanel" aria-labelledby="pi-categories-link"><div id="pi-category-root"></div><div id="pi-category-mappings"></div></div>
     <div id="pi-brands" class="tab-pane" role="tabpanel" aria-labelledby="pi-brands-link"></div>
@@ -69,32 +57,5 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
 </div>
 {include file='./source_tabs_script.tpl'}
 {include file='./source_mappings_script.tpl'}
-{literal}
-<script>
-(function () {
-  function initRows() {
-  Array.prototype.forEach.call(document.querySelectorAll('.pi-mapping-editor'), function (editor) {
-  var body = editor.querySelector('tbody');
-  var prototype = body.querySelector('tr').cloneNode(true);
-  editor.querySelector('.pi-add-row').addEventListener('click', function () {
-    var row = prototype.cloneNode(true);
-    Array.prototype.forEach.call(row.querySelectorAll('input, textarea'), function (input) {
-      input.value = '';
-    });
-    body.appendChild(row);
-  });
-  editor.addEventListener('click', function (event) {
-    if (event.target.classList.contains('pi-remove-row')) {
-      var row = event.target.closest('tr');
-      row.parentNode.removeChild(row);
-    }
-  });
-  });
-  }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initRows);
-  else initRows();
-}());
-</script>
-{/literal}
 {include file='./source_editor_script.tpl'}
 {/if}

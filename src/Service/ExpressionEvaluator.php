@@ -27,10 +27,16 @@ class ExpressionEvaluator
     /** @return mixed PHP 7.2-compatible equivalent of a mixed return type. */
     public function evaluate(string $expression, array $variables)
     {
+        // Feed items omit fields freely (no variants, fewer images): a missing key is null, not a warning.
+        set_error_handler(static function (int $severity, string $message): bool {
+            return str_starts_with($message, 'Undefined array key');
+        }, E_WARNING);
         try {
             return $this->language->evaluate($expression, $variables);
         } catch (\Throwable $error) {
             throw new ExpressionEvaluationException($expression, $error);
+        } finally {
+            restore_error_handler();
         }
     }
 

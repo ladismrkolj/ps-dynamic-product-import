@@ -24,7 +24,7 @@ class AdminPiSourceController extends ModuleAdminController
 
     public function postProcess()
     {
-        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'testSource' => 'ajaxProcessTestSource', 'sampleValues' => 'ajaxProcessSampleValues', 'preview' => 'ajaxProcessPreview', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault'];
+        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'testSource' => 'ajaxProcessTestSource', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
         $action = Tools::getValue('action');
         if ($this->ajax && is_string($action) && isset($actions[$action])) {
             $this->{$actions[$action]}();
@@ -82,6 +82,15 @@ class AdminPiSourceController extends ModuleAdminController
             }
             $selection = $raw === 'all' ? 'all' : (int) $raw;
             $sources = \ProductImport\Service\ImportLauncher::selectSources($this->sources->findAll(), $selection);
+            if (($_POST['overwrite_manual'] ?? '') === '1') {
+                // Forgetting what the import last wrote makes this run overwrite every mapped field again.
+                $products = new \ProductImport\Repository\ExternalProductRepository();
+                $combinations = new \ProductImport\Repository\ExternalCombinationRepository();
+                foreach ($sources as $source) {
+                    $products->resetImportedValues((int) $source['id_source']);
+                    $combinations->resetImportedValues((int) $source['id_source']);
+                }
+            }
             try {
                 $result = (new \ProductImport\Service\BackgroundImport())->start($selection, 'admin-background');
                 $result['mode'] = 'background';
@@ -131,7 +140,7 @@ class AdminPiSourceController extends ModuleAdminController
                 $runs[] = ['id_run' => (int) $row['id_run'], 'id_source' => (int) $row['id_source'],
                     'name' => (string) ($row['source_name'] ?? ''), 'status' => $row['status'],
                     'triggered_by' => $row['triggered_by'] ?? null,
-                    'counts' => ['created' => (int) $row['created_count'], 'updated' => (int) $row['updated_count'],
+                    'counts' => ['created' => (int) $row['created_count'], 'updated' => (int) $row['updated_count'], 'unchanged' => (int) ($row['unchanged_count'] ?? 0),
                         'skipped' => (int) $row['skipped_count'], 'failed' => (int) $row['failed_count']],
                     'error_log' => (string) ($row['error_log'] ?? '')];
             }
@@ -149,26 +158,98 @@ class AdminPiSourceController extends ModuleAdminController
         $this->sendJson($result);
     }
 
-    public function ajaxProcessPreview()
+    /** @return array{0: ?int, 1: ?array} id_source (null for a new source) and the saved source row */
+    private function editorContext(): array
+    {
+        $rawId = $_POST['id_source'] ?? '';
+        if (!is_string($rawId) || ($rawId !== '' && (!ctype_digit($rawId) || (int) $rawId <= 0))) {
+            throw new InvalidArgumentException('id_source must be a positive integer when provided.');
+        }
+        $idSource = $rawId === '' ? null : (int) $rawId;
+        if (!$this->checkToken() || !$this->access($idSource === null ? 'add' : 'edit')) {
+            throw new RuntimeException('Permission denied or invalid security token.');
+        }
+        $source = $idSource === null ? null : $this->sources->find($idSource);
+        if ($idSource !== null && !$source) {
+            throw new InvalidArgumentException('Source not found.');
+        }
+
+        return [$idSource, $source];
+    }
+
+    /** The submitted feed location, which may differ from the saved one. */
+    private function feedInput(): array
+    {
+        $input = [];
+        foreach (['json_url', 'json_file_path', 'source_format', 'xml_item_path'] as $key) {
+            $value = $_POST[$key] ?? null;
+            if ($value !== null && !is_string($value)) {
+                throw new InvalidArgumentException($key . ' must be a string.');
+            }
+            $input[$key] = $value;
+        }
+
+        return $input;
+    }
+
+    /** Editor-only cached fetch; import runs never use it. refresh=1 bypasses the cache. */
+    private function cachedFeed(array $location): array
+    {
+        return (new \ProductImport\Service\FeedCache())->get($location, ($_POST['refresh'] ?? '') === '1');
+    }
+
+    private function cacheInfo(array $feed): array
+    {
+        return ['cached' => $feed['cached'], 'age' => $feed['age'], 'fetched_at' => $feed['fetched_at']];
+    }
+
+    public function ajaxProcessPreviewTable()
     {
         try {
-            if (!$this->access('view') || !$this->checkToken()) {
-                throw new RuntimeException('Permission denied or invalid security token.');
+            [$idSource, $saved] = $this->editorContext();
+            $feed = $this->cachedFeed($this->feedInput());
+            if ($feed['items'] === []) {
+                throw new InvalidArgumentException('Source feed must contain products.');
             }
-            $source = $this->sources->find((int) Tools::getValue('id_source'));
-            if (!$source) {
-                throw new InvalidArgumentException('Save a source before previewing it.');
+            $mapping = [];
+            $targets = $_POST['field_mapping_target'] ?? [];
+            $expressions = $_POST['field_mapping_expression'] ?? [];
+            if (!is_array($targets) || !is_array($expressions) || array_keys($targets) !== array_keys($expressions)) {
+                throw new InvalidArgumentException('Invalid mapping rows.');
             }
-            $item = $this->sampleItem($source);
-            foreach (['field_mapping', 'variant_mapping'] as $column) {
-                if ($column === 'variant_mapping' && empty($source[$column])) {
-                    $source[$column] = null;
+            foreach ($targets as $index => $target) {
+                if (!is_string($target) || !is_string($expressions[$index])) {
+                    throw new InvalidArgumentException('Mapping rows must contain strings.');
+                }
+                [$target, $expression] = [trim($target), trim($expressions[$index])];
+                if ($target === '' && $expression === '') {
                     continue;
                 }
-                $source[$column] = json_decode($source[$column], true);
-                if (json_last_error() !== JSON_ERROR_NONE || !is_array($source[$column])) {
-                    throw new InvalidArgumentException('Invalid saved ' . $column . ' JSON.');
+                if ($target === '' || $expression === '' || array_key_exists($target, $mapping)) {
+                    throw new InvalidArgumentException('Each mapping row needs a unique target and an expression.');
                 }
+                $mapping[$target] = $expression;
+            }
+            $variantMapping = null;
+            $variantsExpression = $_POST['variants_expression'] ?? '';
+            if (!is_string($variantsExpression)) {
+                throw new InvalidArgumentException('Invalid variants expression.');
+            }
+            if (trim($variantsExpression) !== '') {
+                $attributes = $this->rowsToMapping($this->readRows('variant_attribute'));
+                $fields = $this->rowsToMapping($this->readRows('variant_field'));
+                if ($attributes === [] || !isset($fields['reference'])) {
+                    throw new InvalidArgumentException('Variants require at least one attribute and a reference field mapping.');
+                }
+                $definitions = [];
+                foreach ($attributes as $name => $expression) {
+                    $definitions[] = ['name' => (string) $name, 'expression' => $expression];
+                }
+                $variantMapping = ['variants_expression' => trim($variantsExpression), 'attributes' => $definitions, 'fields' => $fields];
+            }
+            $filter = $_POST['filter_expression'] ?? '';
+            if (!is_string($filter)) {
+                throw new InvalidArgumentException('Invalid filter expression.');
             }
             $evaluator = new \ProductImport\Service\ExpressionEvaluator();
             $normalizer = new \ProductImport\Service\CategoryPathNormalizer();
@@ -181,34 +262,32 @@ class AdminPiSourceController extends ModuleAdminController
                 new \ProductImport\Service\VariantFieldMapper($evaluator),
                 new \ProductImport\Service\AttributeResolver()
             );
-            $result = $builder->build($source, $item);
+            $result = $builder->table([
+                'id_source' => (int) $idSource,
+                'filter_expression' => trim($filter) === '' ? null : $filter,
+                'root_category_id' => $saved['root_category_id'] ?? null,
+                'default_id_category' => $saved['default_id_category'] ?? null,
+                'default_id_manufacturer' => $saved['default_id_manufacturer'] ?? null,
+                'field_mapping' => $mapping,
+                'variant_mapping' => $variantMapping,
+            ], $feed['items']);
+            $result['item_count'] = count($feed['items']);
+            $result['cache'] = $this->cacheInfo($feed);
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }
-        header('Content-Type: application/json; charset=utf-8');
-        $json = json_encode($result, JSON_INVALID_UTF8_SUBSTITUTE);
-        die($json === false ? '{"error":"Unable to encode preview response."}' : $json);
-    }
-
-    private function sampleItem(array $source, ?array $fetchedItems = null): array
-    {
-        $index = Tools::getValue('item_index');
-        if (!is_string($index) || !ctype_digit($index)) {
-            throw new InvalidArgumentException('item_index must be a non-negative integer.');
-        }
-        $items = $fetchedItems ?? \ProductImport\Service\FeedFetcher::fetch($source);
-        if (!array_key_exists((int) $index, $items) || !is_array($items[(int) $index])) {
-            throw new InvalidArgumentException('No product object at that index.');
-        }
-        $item = $items[(int) $index];
-        return $item;
+        $this->sendJson($result);
     }
 
     public function ajaxProcessInspect()
     {
         try {
-            $source = $this->requireSource('view');
-            $result = (new \ProductImport\Service\FieldInspector())->inspect($this->sampleItem($source));
+            $this->editorContext();
+            $feed = $this->cachedFeed($this->feedInput());
+            if ($feed['items'] === []) {
+                throw new InvalidArgumentException('Source feed must contain products.');
+            }
+            $result = ['item_count' => count($feed['items']), 'schema' => (new \ProductImport\Service\FeedSchema())->scan($feed['items']), 'cache' => $this->cacheInfo($feed)];
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }
@@ -224,7 +303,7 @@ class AdminPiSourceController extends ModuleAdminController
             if (!is_string($expression) || trim($expression) === '') {
                 throw new InvalidArgumentException('Save a category_paths expression before discovery.');
             }
-            $items = \ProductImport\Service\FeedFetcher::fetch($source);
+            $items = $this->cachedFeed($source)['items'];
             $result = $this->discoverValues($items, (int) $source['id_source'], $expression, false);
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
@@ -235,37 +314,16 @@ class AdminPiSourceController extends ModuleAdminController
     public function ajaxProcessTestSource()
     {
         try {
-            $rawId = $_POST['id_source'] ?? '';
-            if (!is_string($rawId) || ($rawId !== '' && (!ctype_digit($rawId) || (int) $rawId <= 0))) {
-                throw new InvalidArgumentException('id_source must be a positive integer when provided.');
-            }
-            $idSource = $rawId === '' ? null : (int) $rawId;
-            if (!$this->checkToken() || !$this->access($idSource === null ? 'add' : 'edit')) {
-                throw new RuntimeException('Permission denied or invalid security token.');
-            }
-            $source = $idSource === null ? null : $this->sources->find($idSource);
-            if ($idSource !== null && !$source) {
-                throw new InvalidArgumentException('Source not found.');
-            }
-            $input = [];
-            foreach (['json_url', 'json_file_path', 'source_format', 'xml_item_path'] as $key) {
-                $value = $_POST[$key] ?? null;
-                if ($value !== null && !is_string($value)) {
-                    throw new InvalidArgumentException($key . ' must be a string.');
-                }
-                $input[$key] = $value;
-            }
+            [$idSource, $source] = $this->editorContext();
             // Always test the submitted location, never silently substitute the saved URL/path.
-            $items = \ProductImport\Service\FeedFetcher::fetch($input);
+            $input = $this->feedInput();
+            $feed = $this->cachedFeed($input);
+            $items = $feed['items'];
             if ($items === []) {
                 throw new InvalidArgumentException('Source feed must contain products.');
             }
-            $result = ['connectivity' => ['ok' => true, 'format' => ($input['source_format'] === 'xml' ? 'non-empty XML items' : 'non-empty JSON array')], 'item_count' => count($items)];
-            try {
-                $result['inspection'] = (new \ProductImport\Service\FieldInspector())->inspect($this->sampleItem($input, $items));
-            } catch (Throwable $error) {
-                $result['inspection'] = ['error' => $error->getMessage()];
-            }
+            $result = ['connectivity' => ['ok' => true, 'format' => ($input['source_format'] === 'xml' ? 'non-empty XML items' : 'non-empty JSON array')], 'item_count' => count($items),
+                'schema' => (new \ProductImport\Service\FeedSchema())->scan($items), 'cache' => $this->cacheInfo($feed)];
             $mapping = [];
             $mappingError = null;
             if ($source !== null) {
@@ -306,32 +364,14 @@ class AdminPiSourceController extends ModuleAdminController
     public function ajaxProcessSampleValues()
     {
         try {
-            $rawId = $_POST['id_source'] ?? '';
-            if (!is_string($rawId) || ($rawId !== '' && (!ctype_digit($rawId) || (int) $rawId <= 0))) {
-                throw new InvalidArgumentException('id_source must be a positive integer when provided.');
-            }
-            $idSource = $rawId === '' ? null : (int) $rawId;
-            if (!$this->checkToken() || !$this->access($idSource === null ? 'add' : 'edit')) {
-                throw new RuntimeException('Permission denied or invalid security token.');
-            }
-            if ($idSource !== null && !$this->sources->find($idSource)) {
-                throw new InvalidArgumentException('Source not found.');
-            }
+            $this->editorContext();
             $expression = $_POST['expression'] ?? null;
             if (!is_string($expression) || trim($expression) === '') {
                 throw new InvalidArgumentException('Map a source field first.');
             }
             $rawSize = $_POST['sample_size'] ?? null;
             $size = is_string($rawSize) && ctype_digit($rawSize) && (int) $rawSize > 0 ? min(500, (int) $rawSize) : 50;
-            $input = [];
-            foreach (['json_url', 'json_file_path', 'source_format', 'xml_item_path'] as $key) {
-                $value = $_POST[$key] ?? null;
-                if ($value !== null && !is_string($value)) {
-                    throw new InvalidArgumentException($key . ' must be a string.');
-                }
-                $input[$key] = $value;
-            }
-            $items = \ProductImport\Service\FeedFetcher::fetch($input);
+            $items = $this->cachedFeed($this->feedInput())['items'];
             $result = (new \ProductImport\Service\ValueSampler())->sample(array_slice($items, 0, $size), $expression);
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
@@ -533,6 +573,9 @@ class AdminPiSourceController extends ModuleAdminController
                 $helper->actions[] = $action;
             }
         }
+        if ($this->access('view')) {
+            $helper->actions[] = 'export';
+        }
         $cronUrl = $this->context->link->getModuleLink('productimport', 'cron', ['token' => Configuration::get('PIIMPORT_CRON_TOKEN')], true);
         $sources = $this->sources->findAll();
         $panel = '';
@@ -545,12 +588,25 @@ class AdminPiSourceController extends ModuleAdminController
             ]);
             $panel = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/run_import.tpl');
         }
+        $importPanel = '';
+        $canCreate = $this->access('add');
+        $canOverwrite = $this->access('edit');
+        if ($canCreate || $canOverwrite) {
+            $this->context->smarty->assign([
+                'pi_import_url' => $this->context->link->getAdminLink('AdminPiSource') . '&ajax=1&action=importSource',
+                'pi_import_can_create' => $canCreate,
+                'pi_import_can_overwrite' => $canOverwrite,
+                'pi_import_sources' => $sources,
+            ]);
+            $importPanel = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/source_import.tpl');
+        }
+
         return '<div class="alert alert-info">Daily cron URL: <code>' . Tools::safeOutput($cronUrl) . '</code> &mdash; append <code>&amp;source=&lt;ID&gt;</code> to import one specific source instead of all active ones (see the ID column below).</div>' . $panel . $helper->generateList($sources, [
             'id_source' => ['title' => $this->trans('ID')],
             'name' => ['title' => $this->trans('Name')],
             'technical_key' => ['title' => $this->trans('Technical key')],
             'active' => ['title' => $this->trans('Active'), 'type' => 'bool'],
-        ]);
+        ]) . $importPanel;
     }
 
     public function renderForm()
@@ -576,39 +632,25 @@ class AdminPiSourceController extends ModuleAdminController
         if ($rows === null) {
             $rows = [];
             foreach (is_array($mapping) ? $mapping : [] as $target => $expression) {
-                $rows[] = ['target' => $target, 'expression' => $expression];
+                $rows[] = ['target' => (string) $target, 'expression' => $expression];
             }
         }
-        $canonical = ['name', 'reference', 'price', 'regular_price', 'wholesale_price', 'short_description', 'description', 'ean13', 'weight', 'quantity', 'active', 'manufacturer', 'category_paths', 'images', 'main_image'];
-        $fixed = [];
-        foreach ($canonical as $target) {
-            $fixed[$target] = ['target' => $target, 'expression' => '', 'badge' => $target === 'name' ? 'Required for new products' : (in_array($target, ['reference', 'price', 'category_paths', 'images'], true) ? 'Recommended' : 'Optional')];
-        }
-        $custom = [];
-        $assigned = [];
-        foreach ($rows as $row) {
-            if (isset($fixed[$row['target']]) && !isset($assigned[$row['target']])) {
-                $fixed[$row['target']]['expression'] = $row['expression'];
-                $assigned[$row['target']] = true;
-            } else {
-                // Preserve custom rows and invalid duplicate submissions for correction.
-                $custom[] = $row;
-            }
-        }
-        $this->context->smarty->assign(['pi_fixed_rows' => $fixed, 'pi_mapping_rows' => $custom]);
         $variant = $this->submittedVariant ?? json_decode($source['variant_mapping'] ?: '{}', true);
         $variant = is_array($variant) ? $variant : [];
         $variantFields = [];
         foreach ($variant['fields'] ?? [] as $target => $expression) {
-            $variantFields[] = ['target' => $target, 'expression' => $expression];
+            $variantFields[] = ['target' => (string) $target, 'expression' => $expression];
         }
-        $this->context->smarty->assign([
-            'pi_variants_expression' => $variant['variants_expression'] ?? '',
-            'pi_attribute_rows' => $variant['attribute_rows'] ?? array_map(static function ($row) {
+        // The grid script rebuilds the field_mapping_*, variants_expression and variant_* POST fields from this state.
+        $state = [
+            'mapping' => array_values($rows),
+            'variants_expression' => $variant['variants_expression'] ?? '',
+            'attributes' => $variant['attribute_rows'] ?? array_map(static function ($row) {
                 return ['target' => $row['name'], 'expression' => $row['expression']];
             }, $variant['attributes'] ?? []),
-            'pi_variant_field_rows' => $variant['field_rows'] ?? $variantFields,
-        ]);
+            'fields' => $variant['field_rows'] ?? $variantFields,
+        ];
+        $this->context->smarty->assign('pi_state_json', json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}');
         $this->context->smarty->assign(['pi_can_discover' => $this->access('edit'), 'pi_preview_id' => $id, 'pi_preview_url' => $this->context->link->getAdminLink('AdminPiSource'), 'pi_run_log_url' => $this->context->link->getAdminLink('AdminPiRunLog'), 'pi_run_name' => $source['name'], 'pi_run_baseline' => (new \ProductImport\Repository\ImportRunRepository())->maxId(), 'pi_run_deactivate' => $source['deactivate_missing'], 'pi_can_run' => $this->access('edit')]);
         $testHtml = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/preview.tpl');
         $mappingHtml = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/source_form.tpl');
@@ -788,23 +830,7 @@ class AdminPiSourceController extends ModuleAdminController
         if (!in_array($data['id_lang_default'], $languageIds, true)) {
             throw new InvalidArgumentException('Selected source language does not exist.');
         }
-        foreach (['name' => 191, 'technical_key' => 64] as $field => $limit) {
-            if ($data[$field] === '' || Tools::strlen($data[$field]) > $limit) {
-                throw new InvalidArgumentException($field . ' is required and must not exceed ' . $limit . ' characters.');
-            }
-        }
-        if (Tools::strlen($data['identifier_field']) > 191) {
-            throw new InvalidArgumentException('identifier_field must not exceed 191 characters.');
-        }
-        if (!preg_match('/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/D', $data['technical_key'])) {
-            throw new InvalidArgumentException('Technical key must be a lowercase slug (letters, numbers, underscores or hyphens).');
-        }
-        if ($data['json_url'] === '' && $data['json_file_path'] === '') {
-            throw new InvalidArgumentException('Provide a JSON URL or file path.');
-        }
-        if ($data['json_url'] !== '' && (!filter_var($data['json_url'], FILTER_VALIDATE_URL) || !in_array(strtolower((string) parse_url($data['json_url'], PHP_URL_SCHEME)), ['http', 'https'], true))) {
-            throw new InvalidArgumentException('JSON URL must be a valid HTTP or HTTPS URL.');
-        }
+        \ProductImport\Service\SourceConfigTransfer::validateSourceFields($data);
         $existing = $this->sources->findByTechnicalKey($data['technical_key']);
         if ($existing && (int) $existing['id_source'] !== (int) Tools::getValue('id_source')) {
             throw new InvalidArgumentException('Technical key is already in use.');
@@ -856,5 +882,179 @@ class AdminPiSourceController extends ModuleAdminController
         }
 
         return $mapping;
+    }
+
+    public function displayExportLink($token = null, $id = null, $name = null)
+    {
+        $href = $this->context->link->getAdminLink('AdminPiSource') . '&ajax=1&action=exportSource&id_source=' . (int) $id;
+
+        return '<a class="btn btn-default" href="' . Tools::safeOutput($href) . '" title="' . Tools::safeOutput($this->trans('Export')) . '"><i class="icon-download"></i> ' . Tools::safeOutput($this->trans('Export')) . '</a>';
+    }
+
+    public function ajaxProcessExportSource()
+    {
+        try {
+            if (!$this->access('view') || !$this->checkToken()) {
+                throw new RuntimeException('Permission denied or invalid security token.');
+            }
+            $source = $this->sources->find((int) Tools::getValue('id_source'));
+            if (!$source) {
+                throw new InvalidArgumentException('Source not found.');
+            }
+            $idSource = (int) $source['id_source'];
+            $idShop = (int) $this->context->shop->id;
+            $idLang = (int) $source['id_lang_default'];
+            $idRoot = (int) Configuration::get('PS_ROOT_CATEGORY');
+            $categories = new \ProductImport\Repository\CategoryMappingRepository();
+            $manufacturers = new \ProductImport\Repository\ManufacturerMappingRepository();
+            $document = (new \ProductImport\Service\SourceConfigTransfer())->build(
+                $source,
+                $categories->findAllForSource($idSource),
+                $manufacturers->findAllForSource($idSource),
+                [
+                    'language_iso' => static function (int $id) {
+                        $iso = Language::getIsoById($id);
+
+                        return $iso ? (string) $iso : null;
+                    },
+                    'category_path' => static function (int $id) use ($categories, $idRoot, $idShop, $idLang) {
+                        return $categories->findNamePath($id, $idRoot, $idShop, $idLang);
+                    },
+                    'manufacturer_name' => static function (int $id) use ($manufacturers) {
+                        return $manufacturers->findName($id);
+                    },
+                    'supplier_name' => function (int $id) {
+                        return $this->sources->findSupplierName($id);
+                    },
+                ],
+                (string) $this->module->version,
+                gmdate('c')
+            );
+            $yaml = \ProductImport\Service\SourceConfigTransfer::encode($document);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+        $file = preg_replace('/[^a-z0-9_-]+/', '_', (string) $source['technical_key']) . '.productimport.yml';
+        header('Content-Type: text/yaml; charset=utf-8');
+        header('Content-Disposition: attachment; filename="' . $file . '"');
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Length: ' . strlen($yaml));
+        die($yaml);
+    }
+
+    public function ajaxProcessImportSource()
+    {
+        try {
+            if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !$this->checkToken()) {
+                throw new RuntimeException('Permission denied or invalid security token.');
+            }
+            $overwrite = ($_POST['target'] ?? 'new') === 'overwrite';
+            $existing = null;
+            if ($overwrite) {
+                if (!$this->access('edit')) {
+                    throw new RuntimeException('Permission denied or invalid security token.');
+                }
+                $rawId = $_POST['id_source'] ?? '';
+                $existing = is_string($rawId) && ctype_digit($rawId) ? $this->sources->find((int) $rawId) : null;
+                if (!$existing) {
+                    throw new InvalidArgumentException('Choose the source to overwrite.');
+                }
+            } elseif (!$this->access('add')) {
+                throw new RuntimeException('Permission denied or invalid security token.');
+            }
+            $text = $this->readUploadedConfig();
+            $transfer = new \ProductImport\Service\SourceConfigTransfer();
+            $document = $transfer->parse($text, $overwrite);
+            $categories = new \ProductImport\Repository\CategoryMappingRepository();
+            $manufacturers = new \ProductImport\Repository\ManufacturerMappingRepository();
+            $idShop = (int) $this->context->shop->id;
+            $children = [];
+            $lookups = [
+                'language_id' => static function (string $iso) {
+                    $id = (int) Language::getIdByIso($iso);
+
+                    return $id > 0 ? $id : null;
+                },
+                'default_language_id' => static function () {
+                    return (int) Configuration::get('PS_LANG_DEFAULT');
+                },
+                'root_category_id' => (int) Configuration::get('PS_ROOT_CATEGORY'),
+                'category_children' => static function (int $parent, int $idLang) use ($categories, $idShop, &$children) {
+                    return $children[$idLang][$parent] ?? ($children[$idLang][$parent] = $categories->findChildNames($parent, $idShop, $idLang));
+                },
+                'manufacturers' => static function (string $name) use ($manufacturers) {
+                    return $manufacturers->findNamesLike($name);
+                },
+                'suppliers' => function (string $name) {
+                    return $this->sources->findSupplierNamesLike($name);
+                },
+            ];
+            if ($overwrite) {
+                $resolved = $transfer->resolveOverwrite($document, $existing, $lookups);
+            } else {
+                $resolved = $transfer->resolve($document, $lookups, function (string $key) {
+                    return $this->sources->findByTechnicalKey($key) !== null;
+                });
+            }
+            $normalizer = new \ProductImport\Service\CategoryPathNormalizer();
+            $counts = ['categories_created' => 0, 'categories_updated' => 0, 'brands_created' => 0, 'brands_updated' => 0];
+            $db = Db::getInstance();
+            $db->execute('START TRANSACTION');
+            try {
+                if ($overwrite) {
+                    $idSource = (int) $existing['id_source'];
+                    if ($resolved['source'] !== [] && !$this->sources->update($idSource, $resolved['source'])) {
+                        throw new RuntimeException('Unable to update the source.');
+                    }
+                } else {
+                    $idSource = $this->sources->create($resolved['source']);
+                }
+                foreach ($resolved['category_mappings'] as $row) {
+                    $hash = $normalizer->hash($row['source_path']);
+                    $counts[$overwrite && $categories->findOverride($idSource, $hash) !== null ? 'categories_updated' : 'categories_created']++;
+                    $categories->upsertWithOverride($idSource, $hash, json_encode($row['source_path'], JSON_THROW_ON_ERROR), $row['id_category']);
+                }
+                foreach ($resolved['brand_mappings'] as $row) {
+                    $counts[$overwrite && $manufacturers->findOverride($idSource, $row['source_name']) !== null ? 'brands_updated' : 'brands_created']++;
+                    $manufacturers->upsertWithOverride($idSource, $row['source_name'], $row['id_manufacturer']);
+                }
+                $db->execute('COMMIT');
+            } catch (Throwable $error) {
+                $db->execute('ROLLBACK');
+                throw $error;
+            }
+            $result = ['ok' => true, 'mode' => $overwrite ? 'overwrite' : 'new', 'id_source' => $idSource,
+                'name' => $resolved['source']['name'] ?? $existing['name'],
+                'technical_key' => $overwrite ? $existing['technical_key'] : $resolved['source']['technical_key'],
+                'edit_url' => $this->context->link->getAdminLink('AdminPiSource') . '&updatepi_source&id_source=' . $idSource,
+                'counts' => $counts, 'warnings' => $resolved['warnings']];
+        } catch (Throwable $error) {
+            $result = ['error' => $error->getMessage()];
+        }
+        $this->sendJson($result);
+    }
+
+    private function readUploadedConfig(): string
+    {
+        $limit = \ProductImport\Service\SourceConfigTransfer::MAX_BYTES;
+        $file = $_FILES['source_file'] ?? null;
+        if (is_array($file) && ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+            if (!is_string($file['tmp_name'] ?? null) || ($file['error'] ?? null) !== UPLOAD_ERR_OK || !is_uploaded_file($file['tmp_name'])) {
+                throw new InvalidArgumentException(in_array($file['error'] ?? null, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true) ? 'The file is larger than 1 MB.' : 'The file upload failed.');
+            }
+            // Read one byte past the limit so an oversized file is rejected without loading all of it.
+            $json = file_get_contents($file['tmp_name'], false, null, 0, $limit + 1);
+            if ($json === false) {
+                throw new RuntimeException('Unable to read the uploaded file.');
+            }
+
+            return $json;
+        }
+        $pasted = $_POST['source_text'] ?? '';
+        if (!is_string($pasted) || trim($pasted) === '') {
+            throw new InvalidArgumentException('Choose a .productimport.yml file or paste its content.');
+        }
+
+        return $pasted;
     }
 }

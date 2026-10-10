@@ -2,32 +2,51 @@
 
 namespace ProductImport\Service;
 
+use ProductImport\Repository\ImageSourceRepository;
+
 class ProductImageAttacher
 {
     private static array $fingerprints = [];
+    /** Number of image downloads performed by this process (for run verification). */
+    public static int $downloads = 0;
+
+    private ?ImageSourceRepository $sources = null;
 
     public function attach(int $idProduct, string $url): int
     {
+        $this->sources ??= new ImageSourceRepository();
+        $known = $this->sources->findExisting($idProduct, $url);
+        if ($known !== null) {
+            return $known;
+        }
         $temporary = tempnam(_PS_TMP_IMG_DIR_, 'pi_');
         if ($temporary === false) {
             throw new \RuntimeException('Unable to allocate image temporary file.');
         }
         $image = null;
+        $reused = null;
         try {
+            ++self::$downloads;
             $this->downloadImage($url, $temporary);
-            $fingerprint = (new ImageFingerprint())->fromFile($temporary);
+            $fingerprinter = new ImageFingerprint();
+            $fingerprint = $fingerprinter->fromFile($temporary);
             if ($fingerprint !== null) {
                 try {
-                    $known = $this->existingFingerprints($idProduct);
-                    $comparator = new ImageFingerprint();
+                    $this->sources->forgetMissingForProduct($idProduct);
+                    $known = $this->existingFingerprints($idProduct, $fingerprinter);
                     foreach ($known as $idImage => $existing) {
-                        if ($comparator->isSame($fingerprint, $existing)) {
-                            return $idImage;
+                        if ($fingerprinter->isSame($fingerprint, $existing)) {
+                            $reused = (int) $idImage;
+                            break;
                         }
                     }
                 } catch (\Throwable $error) {
                     // A failed lookup must not prevent the existing attachment flow.
                 }
+            }
+            if ($reused !== null) {
+                $this->sources->remember($idProduct, $url, $reused);
+                return $reused;
             }
             $image = new \Image();
             $image->id_product = $idProduct;
@@ -49,6 +68,7 @@ class ProductImageAttacher
             if ($fingerprint !== null) {
                 self::$fingerprints[$idProduct][(int) $image->id] = $fingerprint;
             }
+            $this->sources->remember($idProduct, $url, (int) $image->id);
             return (int) $image->id;
         } catch (\Throwable $error) {
             if ($image !== null && $image->id) {
@@ -60,7 +80,7 @@ class ProductImageAttacher
         }
     }
 
-    private function existingFingerprints(int $idProduct): array
+    private function existingFingerprints(int $idProduct, ImageFingerprint $fingerprinter): array
     {
         $idLang = (int) \Context::getContext()->language->id;
         $images = \Image::getImages($idLang, $idProduct);
@@ -68,7 +88,6 @@ class ProductImageAttacher
             return [];
         }
         $current = [];
-        $fingerprinter = new ImageFingerprint();
         foreach ($images as $row) {
             $idImage = (int) $row['id_image'];
             $path = _PS_PRODUCT_IMG_DIR_ . \Image::getImgFolderStatic($idImage) . $idImage . '.jpg';

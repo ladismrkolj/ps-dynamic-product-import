@@ -49,7 +49,7 @@ class AdminPiRunLogController extends ModuleAdminController
         $helper->simple_header = true;
         $helper->actions = [];
         $fields = [];
-        foreach (['source_name' => 'Source', 'started_at' => 'Started', 'finished_at' => 'Finished', 'status' => 'Status', 'triggered_by' => 'Triggered by', 'created_count' => 'Created', 'updated_count' => 'Updated', 'skipped_count' => 'Skipped', 'failed_count' => 'Failed', 'error_log' => 'Errors'] as $key => $label) {
+        foreach (['source_name' => 'Source', 'started_at' => 'Started', 'finished_at' => 'Finished', 'status' => 'Status', 'triggered_by' => 'Triggered by', 'created_count' => 'Created', 'updated_count' => 'Updated', 'unchanged_count' => 'Unchanged', 'skipped_count' => 'Skipped', 'failed_count' => 'Failed', 'error_log' => 'Errors'] as $key => $label) {
             $fields[$key] = ['title' => $this->trans($label)];
         }
         return $helper->generateList($rows, $fields);

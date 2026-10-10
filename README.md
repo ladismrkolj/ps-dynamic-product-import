@@ -18,8 +18,8 @@ Steps 2–6: source configuration, JSON fetching, mapping expressions, filters, 
    - **JSON URL** or **JSON file path** — exactly one. A URL is fetched over HTTP(S) at import time; a file path is read directly from disk on the PrestaShop server (e.g. useful if the scraper and PrestaShop share a filesystem/volume).
    - Leave **Identifier field** blank for now — inspect the JSON before choosing it.
 3. **Save the source once with just those fields filled in** — saving keeps you on the edit page. Saved expressions enable category and brand discovery.
-4. **Test source** runs automatically after loading a saved source and uses the first item in the feed. It shows available fields with example values, e.g. `breadcrumbs[0].title → "Windsurf"`, to help choose expressions.
-5. Fill in **Identifier field** with the JSON key that uniquely identifies a product within this source (e.g. `product_id`, `sku`, `url`), so re-imports update instead of duplicate. Then fill in **Field mapping** rows: each row is `target field → expression`. The canonical target fields are `name`, `reference`, `price`, `short_description`, `description`, `ean13`, `weight`, `quantity`, `active`, `manufacturer`, `category_paths`, `images`, `main_image` — see "Base-product targets and source options" below for exactly what each does. Every expression sees the whole item as `fields` (e.g. `fields['name']`, `num(fields['price'])`) — see "Expressions" below for the full helper-function list.
+4. The feed on the Product fields tab **loads automatically** when a URL or file path is set (also for a saved source, and again whenever the URL, file path, format or XML item path changes). It scans **every** product and lists each feed field with coverage and sample values, e.g. `breadcrumbs[*].title → "Windsurf"`; fields only some products have (variants, extra images, `regular_price`) are listed too. **Refresh feed** bypasses the 15-minute cache. See "PrestaShop-field mapping and live preview" below.
+5. Pick the **Identifier field**, a key that uniquely identifies a product within this source (e.g. `product_id`, `sku`, `url`), so re-imports update instead of duplicate. Fields present in every product are offered first. Then, for each PrestaShop field on the tab, pick the **Feed field** that fills it, or choose **Formula…** to combine several feed fields. The PrestaShop fields are `name`, `reference`, `price`, `regular_price`, `wholesale_price`, `short_description`, `description`, `ean13`, `weight`, `quantity`, `active`, `manufacturer`, `category_paths`, `images`, `main_image` plus any custom targets; see "Base-product targets and source options" below for exactly what each does. Every expression sees the whole item as `fields` (e.g. `fields['name']`, `num(fields['price'])`); a key that is missing on a product evaluates to `null`. See "Expressions" below for the full helper-function list.
 6. If your source has product variants (size/color/etc.), open **Product fields → Variants (optional)** — see "Combinations" below.
 7. **Save again.**
 8. Click **"Test configuration"** to run one real item through the whole pipeline (filter → mapping → category/manufacturer resolution) without writing anything to the database, and confirm the resolved values look right.
@@ -93,7 +93,7 @@ Unit tests cover VariantFieldMapper and retain all earlier tests. AttributeResol
 
 ## Read-only preview (step 5)
 
-The saved-source form previews the first item fetched from the source. Save configuration edits first. Unsaved sources cannot be previewed. Requests use the tokenized AdminPiSource URL with `ajax=1&action=preview`, routed explicitly from this controller's custom `postProcess()` to `ajaxProcessPreview()`. The endpoint checks view permission and the admin token, validates the numeric item index, catches failures and terminates with JSON. No importer, stock or image attachment code runs. Results are inserted using DOM textContent, not interpreted as HTML.
+Superseded in 0.15.0 by the preview table in "PrestaShop-field mapping and live preview" below, which maps the first 20 products with the unsaved form mapping. The single-item `ajax=1&action=preview` endpoint was removed. As before, preview runs no importer, stock or image attachment code, and results are inserted using DOM textContent, not interpreted as HTML.
 
 PreviewBuilder receives decoded `field_mapping` and `variant_mapping` arrays (or null for no variant mapping); the HTTP caller decodes database JSON. Dependencies are constructor-injected. Results contain `filter`, `base` (values/errors), `categories`, `manufacturer`, `variants` (total/truncated/items), and stage-level `errors`. Mapping/filter failures remain visible; even excluded products are mapped to help diagnose configuration. Five variants are mapped at most; truncated variants are explicitly counted and are not individually evaluated. Null/empty attributes are reported as errors and not sent to the resolver.
 
@@ -212,9 +212,7 @@ Discovery requires a saved source and saved category_paths expression. It fetche
 
 The mapping page shows every discovered path and its current override. Each row has an indented category select and Save mapping button; an empty value restores auto-create. Categories come from one read joining category, category_shop and category_lang for the current shop/admin language, ordered by nleft. Both active and inactive categories are offered. Missing translations use an unnamed label. The page avoids Category::getNestedCategories API/version differences and per-row tree widgets. Edits check the admin token, edit permission, source/path ownership, and selected category availability in the current shop.
 
-The inspect endpoint can inspect an item by its zero-based index. It requires a saved source but no mapping expressions and runs no filter/resolver/importer. FieldInspector returns complete pretty JSON plus a flattened list: depth 4 from the root, first 3 entries per list at every level, maximum 100 rows. Containers at the depth limit become count summaries; a truncated flag indicates any omitted rows. Identifier-style object keys use dots, array indices use brackets, unusual keys use JSON-quoted brackets. Empty arrays are accepted as empty objects at the root because associative JSON decoding loses that distinction. Scalar/nonempty list roots are rejected. Inspection output uses textContent, never HTML interpretation.
-
-New unit tests cover FieldInspector only. Discovery, repository queries, mapping-page rendering/saving, tab upgrades and controller dispatch are intentionally not tested with fake PrestaShop objects.
+The inspect endpoint now scans the whole cached feed with FeedSchema (see "PrestaShop-field mapping and live preview" below); the earlier single-item FieldInspector was removed in 0.15.0.
 
 **Verified live against real PrestaShop 9.1.5, all working**: `php bin/console prestashop:module upgrade productimport` registered the new hidden `AdminPiCategoryMap` tab correctly. The "+ Add source" button renders and links to a working add form. "Inspect sample item" returns correct pretty JSON and a correctly-flattened field list (e.g. `breadcrumbs[0].title` → `"Windsurf"`) for a real saved source. "Discover categories from full JSON" scanned a real 3-item fixture, found 1 unique path, 0 errors, and the "Open category mappings" link took me straight to the new mapping page. Setting an override there (path → an existing "Home" category via the indented `<select>`) saved correctly and the page reflected "→ existing category #2 (— Home #2)" afterward.
 
@@ -254,7 +252,7 @@ MySQL 8.0 does **not** support `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` (see h
 
 ## Source editor v3: product and variant mapping
 
-Test source discovers JSON fields and list candidates. The Product fields tab shows thirteen canonical rows with one source selector each. Choose a discovered field, leave a row unmapped, or choose Custom expression for formulas and the cursor insert control. Saved formulas remain editable and are matched to discovered fields when inspection completes. Custom target fields remain available below the fixed rows.
+Superseded in 0.15.0 by the PrestaShop-field editor (see "PrestaShop-field mapping and live preview" below): the Product fields tab has one row per PrestaShop field with a Feed field select, and saved expressions that match no feed field show as Formula.
 
 Each Product fields row also has **Sample values**. Choose a sample size and run it to see the distinct values and counts produced by the row's current expression from the current feed, even before saving. This is a general aid for writing expressions for any field.
 
@@ -297,6 +295,76 @@ Upgrade to 0.12.0 and choose **Format: XML** on the General tab. Enter the XML f
 Use `products/product` as the item path. The first item exposes flattened field keys `["@attributes"].id`, `name`, `categories.category[0]`, and `categories.category[1]` for mapping. XML sources support Test source, Sample values, filtering, category and brand discovery, and variants just like JSON sources after conversion. Existing sources default to JSON.
 
 `@attributes` and `@value` are synthetic metadata keys invented by this module during XML conversion, not fields in the supplier's XML. For example, `<dobava id="1">Na zalogi</dobava>` becomes `{"@attributes": {"id": "1"}, "@value": "Na zalogi"}`.
+
+## Manual edits are kept (0.14.0)
+
+Upgrade to 0.14.0 before importing; the upgrade adds a nullable `imported_values` column to `pi_external_product` and `pi_external_combination`.
+
+Each link stores an MD5 fingerprint of every field the import last wrote, read back from the store after saving. On the next run a mapped field is written only if the store still holds that value. A field changed in the back office is left alone, while untouched fields keep following the feed. Reverting a field to the imported value resumes syncing it.
+
+- Products: name, description and short description (source language; the slug follows the name), reference, EAN13, price, wholesale price, weight, active, brand, supplier, and categories with the default category. `price`, `regular_price` and the import's discount move together: a hand-edited base price keeps all three. Hand edits to the discount itself are not detected.
+- Descriptions are compared by visible text, because the back-office editor rewraps HTML whenever a product is saved. Formatting-only edits are therefore not treated as manual edits.
+- Combinations: reference, EAN13 and price impact.
+- Stock quantity syncs whenever a product is imported, because orders change it; unchanged products are skipped entirely (see "Unchanged products are skipped"). Images keep their existing attach-only behavior.
+- `deactivate_missing` does not deactivate a stale product that was reactivated by hand after the import deactivated it.
+
+Links without fingerprints, such as links created before 0.14.0, links for a newly mapped field, or links after a source-language change, are overwritten once and then protected. **Run and overwrite manual edits**, on the source list and in the source editor, clears the fingerprints for the selected sources and starts an import. That run rewrites every mapped field. If the run cannot start, for example because another import holds the lock, the next run of those sources overwrites instead.
+
+## Unchanged products are skipped (0.15.0)
+
+Each linked product stores a `feed_hash`: an MD5 of the raw feed item, the source's field and variant mapping, source language and supplier, the resolved category IDs and brand ID, and the module version. When a later run computes the same hash and the product still exists, the run skips the product and its variants and counts it as `unchanged` (shown in run results and the **Unchanged** column of the run log). Skipped links still count as seen, so `deactivate_missing` leaves them alone.
+
+The hash is saved only after the product and all its variants imported. If a product or variant failed, the hash is cleared and the next run retries. **Run and overwrite manual edits** clears the hashes of the selected sources, and deactivating a stale product clears its hash, so an identical item that returns is imported and reactivated.
+
+Stock quantity is part of the raw feed item, so stock syncs only when the item changes: a changed quantity yields a new hash and a full import of that product. A hand-edited product is not repaired by an unchanged run; use **Run and overwrite manual edits** for that.
+
+## Runtime resilience (0.15.0)
+
+- **Image memory.** `pi_image_source` maps each product's image URL (SHA-1) to the image it produced. A known URL whose image still exists is reused without a download. If the image was deleted (by hand or by `bin/dedupe-images.php`), the mapping is dropped and the URL is downloaded, matched by fingerprint and attached or reused again.
+- **Per-run caches.** Category, brand and attribute lookups are cached in memory once per distinct input per run. Preview misses (things a real import would create) are never cached.
+- **Fetch retries and size cap.** JSON/XML fetches retry network errors, HTTP 5xx and 429 up to twice (waits of 2 s and 5 s); other 4xx errors fail at once. Feeds (URL or local file) larger than 200 MB are rejected with an error.
+- **Stuck runs.** When an import takes the lock, any run still marked `running` is marked `failed` with "Interrupted: the import process ended without finishing (timeout or fatal error)."
+- **Background start.** Starting a background import first creates an exclusive `productimport-starting.marker` in the PrestaShop cache directory, so two simultaneous requests cannot both spawn a process (the second gets HTTP 409). The import clears the marker once it holds the lock; a marker older than 60 s is treated as stale.
+
+## Export and import a source configuration (0.15.0)
+
+The source list has an **Export** row action that downloads `<technical_key>.productimport.yml`, and an **Import source configuration** panel below the list (file upload or pasted text). Use them to copy a configuration to another store, to keep a backup, or to edit a whole source (category mappings, field mappings, filters) in a text editor and apply it back.
+
+The file is human-readable YAML with a comment header, a `format: productimport-source` / `version: 1` key and the FULL configuration: the source settings (location, format, identifier, filter, flags), the source language as an ISO code, `field_mapping` as `PrestaShop field: expression` (multi-line expressions as `|` blocks), `variant_mapping`, and names instead of IDs: root and default categories as `Home > Sport` style paths below the shop root, default brand and supplier by name, plus every mapping of the source:
+
+```yaml
+category_mappings:
+  - feed: Windsurf > Sails        # category path in the feed
+    category: Home > Boards       # PrestaShop category path; null = create automatically
+brand_mappings:
+  - feed: Duotone
+    brand: Duotone                # PrestaShop brand; null = create automatically
+```
+
+A path is split on ` > ` (a space, `>`, a space); spaces that belong to a name are kept. A path can also be written as a YAML list (the export does this when a name itself contains ` > `). The export never contains the cron token or any other secret, and no products or run history.
+
+Choose the target in the panel:
+
+- **Create new source** (default) never changes an existing source. If the technical key is taken it becomes `<key>_2`, `_3`, and so on, and ` (imported)` is appended to the name.
+- **Overwrite existing source** applies the file to the selected source, in one transaction: settings present in the file replace the source's settings, settings missing from the file stay; `technical_key` is never changed; `field_mapping` and `variant_mapping`, when present, replace the whole mapping; each listed category or brand mapping adds or updates that feed path/brand's override, mappings not in the file stay untouched, and an explicit `null` (or an omitted target) resets that entry to auto-create. The merged source is validated like the source form. A changed mapping makes the next run reimport the affected products (the importer's feed hash includes the mapping). Overwrite needs edit permission; the result shows how many category and brand mappings were added and updated.
+
+Names are matched in this store: categories by walking the name path from the shop root in the source's language (exact, case-sensitive; every segment must match exactly one category), brands and suppliers by exact name, the language by ISO code. In a new source, unmatched names stay unset (auto-create or the source default); on overwrite they stay as they were. Either way they are listed as warnings with a link to the source. Import never creates categories or brands. Files over 1 MB, unknown format or version, and invalid values (types, key slug, URL, mapping expressions, variant rules) are rejected with a message. Older `.productimport.json` exports (feed paths as `source_path` lists, `source_name`/`manufacturer`) still import, since JSON is valid YAML. Export needs view permission; import needs add permission (create new) or edit permission (overwrite), a valid token and POST.
+
+## PrestaShop-field mapping and live preview in the source editor (0.15.0)
+
+The Product fields tab is organised by **PrestaShop field**, not by feed column. It has three parts, top to bottom:
+
+1. **PrestaShop product fields**: one row per PrestaShop field (`name`, `reference`, `price`, `regular_price`, `wholesale_price`, `short_description`, `description`, `ean13`, `weight`, `quantity`, `active`, `manufacturer`, `category_paths`, `images`, `main_image`, plus custom targets added with **+ Add custom PrestaShop field**), with a short description and its badge. Each row has one **Feed field** select: *— not mapped —*, every feed field of the whole feed labelled with its coverage (`regular_price  · 40/80 products`; lists as `images[*]  · list · 40/80 products`), and **Formula…**. Choosing Formula shows the expression box with **Insert feed field at cursor** and **Sample values**. Several feed fields for one PrestaShop field means a formula, for example `fields['brand'] ~ ' ' ~ fields['model']`.
+2. **Variants (optional)**: a **Variants list** select (lists of objects), then the combination fields (`reference`, `ean13`, `price`, `quantity`, `active`, `image`) and attribute rows (name plus Feed field or Formula). Their selects offer the variant's own sub-fields first, then product fields.
+3. **Feed fields (reference)**: a collapsible table of every field found in **all** products (path, `n/N` and percent, flagged **partial** below 100%, type, up to five samples) with a **Search feed fields** box. It is only a reference; nothing is mapped there. Lists become wildcard fields (`images[*]`, `variants[*].size`); scanning stops at depth 6 and 1000 fields (the status line says when a cap was hit). Keys with unusual characters keep working, for example `["a.b"]`.
+
+- Selecting a feed field generates its canonical expression: `fields['name']` for a top-level key, `path(fields, 'a.b')` for a nested path (null when a key is missing), `fields['a.b']`-style brackets for keys containing a dot. A list feed field mapped to a single-value PrestaShop field becomes `first(fields['images'])`; `images` and `category_paths` receive the whole list. Variant fields use the same forms with `variant`. **Insert feed field at cursor** inserts the same canonical form; the **Filter expression** box on the General tab has the same helper. Missing top-level keys evaluate to null, so these are safe for fields only some products have.
+- A saved expression that equals a feed field's canonical expression (or its `path(...)` equivalent) reopens with that feed field selected; anything else, such as `num(fields['price'])`, reopens as Formula. Unchanged sources save exactly the same `field_mapping` and `variant_mapping` JSON.
+- The feed **loads automatically** when the editor opens (once a URL or file path is present) and again, debounced, when the URL, file path, format or XML item path changes. **Refresh feed** is the only button; it bypasses the cache. The status line shows `N products, M fields, cached <age>`.
+- **Identifier field** lists top-level scalar fields, those present in every product first, with their coverage.
+- **Preview** maps the first 20 products with the mapping currently on the form (saved or not) in dry-run mode, with per-cell errors, the filter result and variant counts. It replaces the single-item Test configuration.
+
+The editor fetches the feed once and reuses a decoded copy for 15 minutes (`<cache dir>/productimport/feed-<sha1>.json`, written atomically). Test source, Sample values, category discovery and the preview all use it; real imports always fetch the live feed. The `inspect` and `previewTable` AJAX actions replace the first-item inspection and `preview`.
 
 ## Shipping
 

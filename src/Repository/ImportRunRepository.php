@@ -17,7 +17,7 @@ class ImportRunRepository
     public function finish(int $idRun, string $status, array $counts, string $errorLog): void
     {
         $sets = ["`status` = '" . pSQL($status) . "'", '`finished_at` = NOW()', "`error_log` = '" . pSQL(self::capLog($errorLog), true) . "'"];
-        foreach (['created', 'updated', 'skipped', 'failed'] as $key) {
+        foreach (['created', 'updated', 'unchanged', 'skipped', 'failed'] as $key) {
             $sets[] = '`' . $key . '_count` = ' . (int) max(0, $counts[$key] ?? 0);
         }
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'pi_import_run` SET ' . implode(', ', $sets) . ' WHERE `id_run` = ' . (int) $idRun)) {
@@ -37,6 +37,26 @@ class ImportRunRepository
     public function maxId(): int
     {
         return (int) \Db::getInstance()->getValue('SELECT COALESCE(MAX(`id_run`), 0) FROM `' . _DB_PREFIX_ . 'pi_import_run`');
+    }
+
+    public const INTERRUPTED_MESSAGE = 'Interrupted: the import process ended without finishing (timeout or fatal error).';
+
+    /**
+     * Call only while holding the import lock: no run can legitimately still be 'running'.
+     *
+     * @return int number of rows marked failed
+     */
+    public function failStuckRuns(): int
+    {
+        $db = \Db::getInstance();
+        if (!$db->execute(
+            'UPDATE `' . _DB_PREFIX_ . "pi_import_run` SET `status` = 'failed', `finished_at` = NOW(), `error_log` = CONCAT_WS('\\n', NULLIF(`error_log`, ''), '"
+            . pSQL(self::INTERRUPTED_MESSAGE) . "') WHERE `status` = 'running'"
+        )) {
+            throw new \RuntimeException('Unable to reap stuck import runs.');
+        }
+
+        return (int) $db->Affected_Rows();
     }
 
     public function findAfter(array $sourceIds, int $baseline): array

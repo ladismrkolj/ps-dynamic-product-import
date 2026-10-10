@@ -48,6 +48,9 @@ class ImportLauncher
             throw new ImportLockBusyException('Import already running or lock unavailable');
         }
         try {
+            BackgroundImport::clearStartingMarker();
+            // Holding the lock means no other run is active, so any 'running' row is a leftover.
+            (new ImportRunRepository())->failStuckRuns();
             $ready = [];
             $results = [];
             foreach ($sources as $source) {
@@ -66,7 +69,7 @@ class ImportLauncher
                     $ready[] = $source;
                 } catch (\Throwable $error) {
                     $runs = new ImportRunRepository();
-                    $counts = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'failed' => 0];
+                    $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0];
                     $message = $error->getMessage();
                     try {
                         $idRun = $runs->start((int) $source['id_source'], $triggeredBy);

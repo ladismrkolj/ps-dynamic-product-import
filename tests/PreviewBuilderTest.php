@@ -15,7 +15,7 @@ use ProductImport\Service\VariantFieldMapper;
 
 class PreviewBuilderTest extends TestCase
 {
-    private function build(array $source, array $item = []): array
+    private function builder(): PreviewBuilder
     {
         $evaluator = new ExpressionEvaluator();
         $categories = new class () extends CategoryResolver {
@@ -51,8 +51,35 @@ class PreviewBuilderTest extends TestCase
                 return ['id_attribute_group' => 1, 'id_attribute' => null, 'create_group' => false, 'create_value' => true];
             }
         };
-        $builder = new PreviewBuilder(new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, new VariantFieldMapper($evaluator), $attributes);
-        return $builder->build($source + ['id_source' => 7, 'root_category_id' => 9, 'default_id_category' => 23, 'default_id_manufacturer' => 24, 'field_mapping' => []], $item);
+        return new PreviewBuilder(new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, new VariantFieldMapper($evaluator), $attributes);
+    }
+
+    private function build(array $source, array $item = []): array
+    {
+        return $this->builder()->build($this->withDefaults($source), $item);
+    }
+
+    private function withDefaults(array $source): array
+    {
+        return $source + ['id_source' => 7, 'root_category_id' => 9, 'default_id_category' => 23, 'default_id_manufacturer' => 24, 'field_mapping' => []];
+    }
+
+    public function testTableMapsItemsWithPerCellErrorsAndVariantCounts(): void
+    {
+        $source = $this->withDefaults(['field_mapping' => ['name' => 'path(fields, "name")', 'price' => 'str(fields["variants"])', 'regular_price' => 'path(fields, "regular_price")'],
+            'variant_mapping' => ['variants_expression' => 'path(fields, "variants")', 'attributes' => [['name' => 'Size', 'expression' => 'path(variant, "size")']], 'fields' => ['reference' => 'path(variant, "sku")']]]);
+        $table = $this->builder()->table($source, [['name' => 'Board', 'variants' => [['sku' => 'A', 'size' => 'S'], ['sku' => 'B']]], 'bad', ['name' => 'Sail']], 20);
+        self::assertSame(['name', 'price', 'regular_price'], $table['targets']);
+        self::assertCount(3, $table['rows']);
+        self::assertSame('Board', $table['rows'][0]['cells']['name']['value']);
+        self::assertNull($table['rows'][0]['cells']['regular_price']['value']);
+        self::assertNull($table['rows'][0]['cells']['regular_price']['error']);
+        self::assertNotNull($table['rows'][0]['cells']['price']['error']);
+        self::assertSame(2, $table['rows'][0]['variants']['total']);
+        self::assertGreaterThan(0, $table['rows'][0]['variants']['errors']);
+        self::assertSame('Item is not an object.', $table['rows'][1]['notes']['item']);
+        self::assertSame(0, $table['rows'][2]['variants']['total']);
+        self::assertCount(1, $this->builder()->table($source, [['name' => 'A'], ['name' => 'B']], 1)['rows']);
     }
 
     public function testAssemblesFieldsAndReadOnlyResolutions(): void

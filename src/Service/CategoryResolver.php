@@ -8,6 +8,8 @@ class CategoryResolver
 {
     private $mappings;
     private $normalizer;
+    /** @var array<string, int|array> Per-instance (per-run) results; commit mode is part of the key. */
+    private array $cache = [];
 
     public function __construct(CategoryMappingRepository $mappings, CategoryPathNormalizer $normalizer)
     {
@@ -27,16 +29,21 @@ class CategoryResolver
                 continue;
             }
             $hash = $this->normalizer->hash($path);
+            $key = self::cacheKey($idSource, $rootCategoryId, $defaultId, $commit, $hash);
+            if (array_key_exists($key, $this->cache)) {
+                $resolved[] = $this->cache[$key];
+                continue;
+            }
             if ($commit) {
                 $this->mappings->upsertSeen($idSource, $hash, json_encode($path));
             }
             $override = $this->mappings->findOverride($idSource, $hash);
             if ($override !== null && $override['id_category'] !== null) {
-                $resolved[] = $commit ? (int) $override['id_category'] : ['path' => $path, 'id_category' => (int) $override['id_category'], 'auto_create' => false];
+                $resolved[] = $this->cache[$key] = $commit ? (int) $override['id_category'] : ['path' => $path, 'id_category' => (int) $override['id_category'], 'auto_create' => false];
                 continue;
             }
             if ($defaultId !== null) {
-                $resolved[] = $commit ? $defaultId : ['path' => $path, 'id_category' => $defaultId, 'auto_create' => false];
+                $resolved[] = $this->cache[$key] = $commit ? $defaultId : ['path' => $path, 'id_category' => $defaultId, 'auto_create' => false];
                 continue;
             }
             $parent = $rootCategoryId ?? (int) \Configuration::get('PS_ROOT_CATEGORY');
@@ -49,10 +56,20 @@ class CategoryResolver
                     break;
                 }
             }
-            $resolved[] = $commit ? $parent : ['path' => $path, 'id_category' => $parent, 'auto_create' => $parent === null];
+            $entry = $commit ? $parent : ['path' => $path, 'id_category' => $parent, 'auto_create' => $parent === null];
+            // A preview miss (category not yet created) can go stale once a commit creates it.
+            if ($commit || $parent !== null) {
+                $this->cache[$key] = $entry;
+            }
+            $resolved[] = $entry;
         }
 
         return $resolved;
+    }
+
+    public static function cacheKey(int $idSource, ?int $rootCategoryId, ?int $defaultId, bool $commit, string $hash): string
+    {
+        return $idSource . '|' . ($rootCategoryId ?? 'n') . '|' . ($defaultId ?? 'n') . '|' . ($commit ? 'c' : 'p') . '|' . $hash;
     }
 
     /** Record paths only: never look up overrides or create catalog categories. */

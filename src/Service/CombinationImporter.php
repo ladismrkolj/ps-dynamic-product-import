@@ -36,20 +36,27 @@ class CombinationImporter
         if (!\Validate::isLoadedObject($product)) {
             throw new \RuntimeException('Combination parent product does not exist.');
         }
-        $id = $this->combinations->findCombinationId($idSource, $externalId);
+        $link = $this->combinations->findLink($idSource, $externalId);
+        $id = $link['id_product_attribute'] ?? null;
         $combination = $id === null ? new \Combination() : new \Combination($id);
         if ($id !== null && (!\Validate::isLoadedObject($combination) || (int) $combination->id_product !== $idProduct)) {
             throw new \RuntimeException('Linked combination is missing or belongs to another product.');
         }
+        // Fields whose store value differs from what the import last wrote were edited manually: keep them.
+        $imported = $link['imported_values'] ?? [];
+        $current = $id === null || $imported === [] ? [] : ImportedValues::fingerprint(self::storeValues($combination));
+        $written = [];
         $combination->id_product = $idProduct;
         foreach (['reference', 'ean13'] as $field) {
-            if (isset($mappedFields[$field])) {
+            if (isset($mappedFields[$field]) && ImportedValues::writable($imported, $current, $field)) {
                 $combination->$field = (string) $mappedFields[$field];
+                $written[] = $field;
             }
         }
-        if (isset($mappedFields['price'])) {
+        if (isset($mappedFields['price']) && ImportedValues::writable($imported, $current, 'price')) {
             // product_attribute.price is the impact, using the same tax basis as the base price.
             $combination->price = round((float) $mappedFields['price'] - $baseProductPrice, 6);
+            $written[] = 'price';
         }
         $defaultId = (int) \Db::getInstance()->getValue(
             'SELECT `id_product_attribute` FROM `' . _DB_PREFIX_ . 'product_attribute_shop` WHERE `id_product` = ' . (int) $idProduct
@@ -78,8 +85,19 @@ class CombinationImporter
                 \PrestaShopLogger::addLog('Combination image skipped: ' . $error->getMessage(), 2, null, 'Product', $idProduct);
             }
         }
-        $this->combinations->link($idSource, $externalId, (int) $combination->id, $idProduct);
+        $imported = array_intersect_key(ImportedValues::fingerprint(self::storeValues($combination)), array_flip($written)) + $imported;
+        $this->combinations->link($idSource, $externalId, (int) $combination->id, $idProduct, null, $imported);
 
         return (int) $combination->id;
+    }
+
+    /** Store values the import can write, normalized to strings for comparison. */
+    private static function storeValues(\Combination $combination): array
+    {
+        return [
+            'reference' => (string) $combination->reference,
+            'ean13' => (string) $combination->ean13,
+            'price' => ImportedValues::number($combination->price),
+        ];
     }
 }

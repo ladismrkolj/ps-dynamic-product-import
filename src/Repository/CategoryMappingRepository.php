@@ -46,4 +46,63 @@ class CategoryMappingRepository
             throw new \RuntimeException('Unable to save category override.');
         }
     }
+
+    /** Insert or replace one mapping row with its override (used when importing a source configuration). */
+    public function upsertWithOverride(int $idSource, string $hash, string $sourcePath, ?int $idCategory): void
+    {
+        if (!\Db::getInstance()->execute(
+            'INSERT INTO `' . _DB_PREFIX_ . 'pi_category_mapping` (`id_source`, `source_path_hash`, `source_path`, `id_category`, `date_upd`) VALUES ('
+            . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', " . ($idCategory === null ? 'NULL' : (int) $idCategory)
+            . ", '" . pSQL(date('Y-m-d H:i:s')) . "') ON DUPLICATE KEY UPDATE `id_category` = VALUES(`id_category`), `date_upd` = VALUES(`date_upd`)"
+        )) {
+            throw new \RuntimeException('Unable to save imported category mapping.');
+        }
+    }
+
+    /**
+     * Names of the categories directly under $idParent in the shop and language.
+     *
+     * @return array<int,string> id_category => name
+     */
+    public function findChildNames(int $idParent, int $idShop, int $idLang): array
+    {
+        $rows = \Db::getInstance()->executeS('SELECT c.`id_category`, cl.`name` FROM `' . _DB_PREFIX_ . 'category` c'
+            . ' INNER JOIN `' . _DB_PREFIX_ . 'category_shop` cs ON cs.`id_category` = c.`id_category` AND cs.`id_shop` = ' . (int) $idShop
+            . ' INNER JOIN `' . _DB_PREFIX_ . 'category_lang` cl ON cl.`id_category` = c.`id_category` AND cl.`id_shop` = cs.`id_shop` AND cl.`id_lang` = ' . (int) $idLang
+            . ' WHERE c.`id_parent` = ' . (int) $idParent . ' ORDER BY c.`id_category`');
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to list child categories.');
+        }
+        $names = [];
+        foreach ($rows as $row) {
+            $names[(int) $row['id_category']] = (string) $row['name'];
+        }
+
+        return $names;
+    }
+
+    /**
+     * Name path from below the shop root category down to $idCategory, or null when it is missing,
+     * unnamed or not below the root.
+     *
+     * @return list<string>|null
+     */
+    public function findNamePath(int $idCategory, int $idRoot, int $idShop, int $idLang): ?array
+    {
+        $path = [];
+        $current = $idCategory;
+        for ($guard = 0; $guard < 50 && $current !== $idRoot; ++$guard) {
+            $row = \Db::getInstance()->getRow('SELECT c.`id_parent`, cl.`name` FROM `' . _DB_PREFIX_ . 'category` c'
+                . ' INNER JOIN `' . _DB_PREFIX_ . 'category_shop` cs ON cs.`id_category` = c.`id_category` AND cs.`id_shop` = ' . (int) $idShop
+                . ' INNER JOIN `' . _DB_PREFIX_ . 'category_lang` cl ON cl.`id_category` = c.`id_category` AND cl.`id_shop` = cs.`id_shop` AND cl.`id_lang` = ' . (int) $idLang
+                . ' WHERE c.`id_category` = ' . (int) $current);
+            if (!$row || (string) $row['name'] === '') {
+                return null;
+            }
+            array_unshift($path, (string) $row['name']);
+            $current = (int) $row['id_parent'];
+        }
+
+        return $current === $idRoot && $path !== [] ? $path : null;
+    }
 }

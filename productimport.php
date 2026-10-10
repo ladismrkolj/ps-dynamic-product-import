@@ -12,7 +12,7 @@ class ProductImport extends Module
     {
         $this->name = 'productimport';
         $this->tab = 'administration';
-        $this->version = '0.13.0';
+        $this->version = '0.15.0';
         $this->author = 'Product Import';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -83,6 +83,8 @@ class ProductImport extends Module
             `external_id` VARCHAR(191) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
             `id_product` INT UNSIGNED NOT NULL,
             `id_run_last_seen` INT UNSIGNED NULL,
+            `imported_values` TEXT NULL,
+            `feed_hash` CHAR(32) NULL,
             `date_upd` DATETIME NOT NULL,
             PRIMARY KEY (`id_source`, `external_id`)
         ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4')) {
@@ -94,6 +96,7 @@ class ProductImport extends Module
             `id_product_attribute` INT UNSIGNED NOT NULL,
             `id_product` INT UNSIGNED NOT NULL,
             `id_run_last_seen` INT UNSIGNED NULL,
+            `imported_values` TEXT NULL,
             `date_upd` DATETIME NOT NULL,
             PRIMARY KEY (`id_source`, `external_id`)
         ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4')) {
@@ -110,8 +113,18 @@ class ProductImport extends Module
             `updated_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `skipped_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `failed_count` INT UNSIGNED NOT NULL DEFAULT 0,
+            `unchanged_count` INT UNSIGNED NOT NULL DEFAULT 0,
             `error_log` LONGTEXT NULL,
             PRIMARY KEY (`id_run`), KEY `source_run` (`id_source`, `id_run`)
+        ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4')) {
+            return false;
+        }
+        // Remembers which feed image URL became which product image, so known URLs are never downloaded again.
+        if (!Db::getInstance()->execute('CREATE TABLE IF NOT EXISTS `' . _DB_PREFIX_ . 'pi_image_source` (
+            `id_product` INT UNSIGNED NOT NULL,
+            `url_hash` CHAR(40) NOT NULL,
+            `id_image` INT UNSIGNED NOT NULL,
+            PRIMARY KEY (`id_product`, `url_hash`), KEY `id_image` (`id_image`)
         ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8mb4')) {
             return false;
         }
@@ -136,7 +149,7 @@ class ProductImport extends Module
 
     public function uninstall()
     {
-        foreach (['pi_import_run', 'pi_external_combination', 'pi_external_product', 'pi_category_mapping', 'pi_manufacturer_mapping', 'pi_source'] as $table) {
+        foreach (['pi_image_source', 'pi_import_run', 'pi_external_combination', 'pi_external_product', 'pi_category_mapping', 'pi_manufacturer_mapping', 'pi_source'] as $table) {
             if (!Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . $table . '`')) {
                 return false;
             }

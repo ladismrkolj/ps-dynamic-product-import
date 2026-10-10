@@ -8,6 +8,7 @@
     {/foreach}
   </select>
   <button type="button" id="pi-run-list-button" class="btn btn-default">Run import now</button>
+  <button type="button" id="pi-run-list-overwrite" class="btn btn-default" data-overwrite="1">Run and overwrite manual edits</button>
   <div id="pi-run-list-results" aria-live="polite"></div>
 </div>
 {include file='./run_import_script.tpl'}

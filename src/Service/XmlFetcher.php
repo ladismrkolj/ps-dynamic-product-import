@@ -4,18 +4,19 @@ namespace ProductImport\Service;
 
 class XmlFetcher
 {
+    private FeedDownloader $downloader;
+
+    public function __construct(?FeedDownloader $downloader = null)
+    {
+        $this->downloader = $downloader ?? new FeedDownloader();
+    }
+
     public function fetch(?string $url, ?string $filePath, ?string $itemPath): array
     {
         if ($url !== null && trim($url) !== '') {
             $body = $this->fetchUrl($url);
         } elseif ($filePath !== null && trim($filePath) !== '') {
-            if (!is_file($filePath) || !is_readable($filePath)) {
-                throw new \RuntimeException('XML file is not a readable regular file: ' . $filePath);
-            }
-            $body = @file_get_contents($filePath);
-            if ($body === false) {
-                throw new \RuntimeException('Unable to read XML file: ' . $filePath);
-            }
+            $body = $this->downloader->readFile($filePath, 'XML');
         } else {
             throw new \InvalidArgumentException('Provide an XML URL or file path.');
         }
@@ -110,32 +111,6 @@ class XmlFetcher
 
     private function fetchUrl(string $url): string
     {
-        $handle = curl_init($url);
-        if ($handle === false) {
-            throw new \RuntimeException('Unable to initialize cURL.');
-        }
-        try {
-            $protocolOption = defined('CURLOPT_PROTOCOLS_STR') ? constant('CURLOPT_PROTOCOLS_STR') : CURLOPT_PROTOCOLS;
-            $protocolValue = defined('CURLOPT_PROTOCOLS_STR') ? 'http,https' : CURLPROTO_HTTP | CURLPROTO_HTTPS;
-            curl_setopt_array($handle, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => 30,
-                CURLOPT_TIMEOUT => 120,
-                $protocolOption => $protocolValue,
-            ]);
-            $body = curl_exec($handle);
-            if ($body === false) {
-                throw new \RuntimeException('XML request failed: ' . curl_error($handle));
-            }
-            $status = (int) curl_getinfo($handle, CURLINFO_HTTP_CODE);
-            if ($status < 200 || $status >= 300) {
-                throw new \RuntimeException('XML request returned HTTP ' . $status . '.');
-            }
-            return $body;
-        } finally {
-            if (is_resource($handle)) {
-                curl_close($handle);
-            }
-        }
+        return $this->downloader->fetchUrl($url, 'XML');
     }
 }

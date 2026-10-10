@@ -4,6 +4,14 @@ namespace ProductImport\Service;
 
 class AttributeResolver
 {
+    /** @var array<string, array> Per-instance (per-run) results; commit mode is part of the key. */
+    private array $cache = [];
+
+    public static function cacheKey(string $groupName, string $valueName, bool $commit): string
+    {
+        return ($commit ? 'c' : 'p') . '|' . json_encode([$groupName, $valueName]);
+    }
+
     public function resolve(string $groupName, string $valueName, bool $commit = true): array
     {
         $groupName = trim($groupName);
@@ -11,6 +19,21 @@ class AttributeResolver
         if ($groupName === '' || $valueName === '') {
             throw new \InvalidArgumentException('Attribute group and value names must not be empty.');
         }
+        $key = self::cacheKey($groupName, $valueName, $commit);
+        if (isset($this->cache[$key])) {
+            return $this->cache[$key];
+        }
+        $result = $this->lookup($groupName, $valueName, $commit);
+        // A preview miss (group/value not yet created) can go stale once a commit creates it.
+        if ($commit || ($result['id_attribute'] !== null && $result['id_attribute_group'] !== null)) {
+            $this->cache[$key] = $result;
+        }
+
+        return $result;
+    }
+
+    private function lookup(string $groupName, string $valueName, bool $commit): array
+    {
         $idGroup = (int) \Db::getInstance()->getValue(
             'SELECT `id_attribute_group` FROM `' . _DB_PREFIX_ . "attribute_group_lang` WHERE BINARY `name` = '" . pSQL($groupName, true) . "' ORDER BY `id_attribute_group`"
         );

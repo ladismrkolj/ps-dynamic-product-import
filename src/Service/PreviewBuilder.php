@@ -12,6 +12,8 @@ class PreviewBuilder
     private $variants;
     private $attributes;
     public const VARIANT_LIMIT = 5;
+    public const TABLE_LIMIT = 20;
+    public const DISPLAY_LIMIT = 200;
 
     public function __construct(
         ProductFilter $filter,
@@ -93,5 +95,53 @@ class PreviewBuilder
         }
 
         return $result;
+    }
+
+    /**
+     * Dry-run preview of many items with the (possibly unsaved) mapping in $source: one row per item,
+     * one cell per mapped target. Cell values are display strings (null stays null). No writes.
+     *
+     * @return array{targets: list<string>, rows: list<array<string, mixed>>}
+     */
+    public function table(array $source, array $items, int $limit = self::TABLE_LIMIT): array
+    {
+        $targets = array_keys($source['field_mapping']);
+        $rows = [];
+        foreach (array_slice($items, 0, $limit, true) as $index => $item) {
+            if (!is_array($item)) {
+                $rows[] = ['index' => $index, 'included' => null, 'cells' => [], 'notes' => ['item' => 'Item is not an object.'],
+                    'variants' => ['total' => 0, 'errors' => 0]];
+                continue;
+            }
+            $result = $this->build($source, $item);
+            $cells = [];
+            foreach ($targets as $target) {
+                $cells[$target] = ['value' => self::display($result['base']['values'][$target] ?? null), 'error' => $result['base']['errors'][$target] ?? null];
+            }
+            $variantErrors = isset($result['errors']['variants']) ? 1 : 0;
+            foreach ($result['variants']['items'] as $variant) {
+                $variantErrors += count($variant['fields']['errors']) + count($variant['attributes']['errors']);
+            }
+            $rows[] = ['index' => $index, 'included' => $result['filter']['should_import'] ?? null, 'cells' => $cells,
+                'notes' => $result['errors'], 'variants' => ['total' => $result['variants']['total'], 'errors' => $variantErrors]];
+        }
+
+        return ['targets' => $targets, 'rows' => $rows];
+    }
+
+    private static function display($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_bool($value)) {
+            $text = $value ? 'true' : 'false';
+        } elseif (is_scalar($value)) {
+            $text = (string) $value;
+        } else {
+            $text = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '[unprintable]';
+        }
+
+        return mb_substr($text, 0, self::DISPLAY_LIMIT);
     }
 }
