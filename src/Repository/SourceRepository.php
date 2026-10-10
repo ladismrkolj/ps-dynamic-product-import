@@ -14,7 +14,7 @@ class SourceRepository
     {
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_source` ORDER BY `id_source`');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to list import sources.');
+            throw new \RuntimeException(DbError::message('Unable to list import sources'));
         }
 
         return $rows;
@@ -47,7 +47,7 @@ class SourceRepository
         $assignments[] = "`date_add` = '" . $now . "'";
         $assignments[] = "`date_upd` = '" . $now . "'";
         if (!\Db::getInstance()->execute('INSERT INTO `' . _DB_PREFIX_ . 'pi_source` SET ' . implode(', ', $assignments))) {
-            throw new \RuntimeException('Unable to create import source.');
+            throw new \RuntimeException(DbError::message('Unable to create import source'));
         }
 
         return (int) \Db::getInstance()->Insert_ID();
@@ -88,7 +88,7 @@ class SourceRepository
     {
         $rows = \Db::getInstance()->executeS('SELECT `id_supplier`, `name` FROM `' . _DB_PREFIX_ . "supplier` WHERE `name` = '" . pSQL($name) . "'");
         if ($rows === false) {
-            throw new \RuntimeException('Unable to look up suppliers.');
+            throw new \RuntimeException(DbError::message('Unable to look up suppliers'));
         }
 
         return array_column($rows, 'name', 'id_supplier');

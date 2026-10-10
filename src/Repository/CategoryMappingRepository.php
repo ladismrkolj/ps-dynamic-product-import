@@ -9,7 +9,7 @@ class CategoryMappingRepository
     {
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_category_mapping` WHERE `id_source` = ' . (int) $idSource . ' ORDER BY `id_mapping`');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to list category mappings.');
+            throw new \RuntimeException(DbError::message('Unable to list category mappings'));
         }
         return $rows;
     }
@@ -32,7 +32,7 @@ class CategoryMappingRepository
             . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', '" . $now . "', '" . $now
             . "') ON DUPLICATE KEY UPDATE `date_seen` = VALUES(`date_seen`), `date_upd` = VALUES(`date_upd`)"
         )) {
-            throw new \RuntimeException('Unable to record category path.');
+            throw new \RuntimeException(DbError::message('Unable to record category path'));
         }
     }
 
@@ -45,7 +45,7 @@ class CategoryMappingRepository
             . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', " . ($idCategory === null ? 'NULL' : (int) $idCategory)
             . ", '" . pSQL(date('Y-m-d H:i:s')) . "')"
         )) {
-            throw new \RuntimeException('Unable to add category mapping.');
+            throw new \RuntimeException(DbError::message('Unable to add category mapping'));
         }
 
         return $db->Affected_Rows() > 0;
@@ -57,7 +57,7 @@ class CategoryMappingRepository
         if (!\Db::getInstance()->execute(
             'DELETE FROM `' . _DB_PREFIX_ . 'pi_category_mapping` WHERE `id_source` = ' . (int) $idSource . " AND `source_path_hash` = '" . pSQL($hash) . "'"
         )) {
-            throw new \RuntimeException('Unable to delete category mapping.');
+            throw new \RuntimeException(DbError::message('Unable to delete category mapping'));
         }
     }
 
@@ -70,7 +70,7 @@ class CategoryMappingRepository
             . ", `date_upd` = '" . pSQL(date('Y-m-d H:i:s')) . "' WHERE `id_source` = " . (int) $idSource
             . " AND `source_path_hash` = '" . pSQL($hash) . "'"
         )) {
-            throw new \RuntimeException('Unable to save category override.');
+            throw new \RuntimeException(DbError::message('Unable to save category override'));
         }
     }
 
@@ -82,7 +82,7 @@ class CategoryMappingRepository
             . (int) $idSource . ", '" . pSQL($hash) . "', '" . pSQL($sourcePath, true) . "', " . ($idCategory === null ? 'NULL' : (int) $idCategory)
             . ", '" . pSQL(date('Y-m-d H:i:s')) . "') ON DUPLICATE KEY UPDATE `id_category` = VALUES(`id_category`), `date_upd` = VALUES(`date_upd`)"
         )) {
-            throw new \RuntimeException('Unable to save imported category mapping.');
+            throw new \RuntimeException(DbError::message('Unable to save imported category mapping'));
         }
     }
 
@@ -98,7 +98,7 @@ class CategoryMappingRepository
             . ' INNER JOIN `' . _DB_PREFIX_ . 'category_lang` cl ON cl.`id_category` = c.`id_category` AND cl.`id_shop` = cs.`id_shop` AND cl.`id_lang` = ' . (int) $idLang
             . ' WHERE c.`id_parent` = ' . (int) $idParent . ' ORDER BY c.`id_category`');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to list child categories.');
+            throw new \RuntimeException(DbError::message('Unable to list child categories'));
         }
         $names = [];
         foreach ($rows as $row) {

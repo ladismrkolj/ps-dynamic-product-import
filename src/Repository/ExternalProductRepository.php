@@ -14,7 +14,7 @@ class ExternalProductRepository
         }
         $rows = \Db::getInstance()->executeS($query . ' ORDER BY `id_product`');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to find linked products.');
+            throw new \RuntimeException(DbError::message('Unable to find linked products'));
         }
         return array_map('intval', array_column($rows, 'id_product'));
     }
@@ -48,7 +48,7 @@ class ExternalProductRepository
             . (int) $idSource . ", '" . pSQL($externalId, true) . "', " . (int) $idProduct . ", " . ($idRun === null ? 'NULL' : (int) $idRun) . ', ' . $values . ", '" . pSQL(date('Y-m-d H:i:s'))
             . "') ON DUPLICATE KEY UPDATE `id_product` = VALUES(`id_product`), `date_upd` = VALUES(`date_upd`), `id_run_last_seen` = COALESCE(VALUES(`id_run_last_seen`), `id_run_last_seen`), `imported_values` = COALESCE(VALUES(`imported_values`), `imported_values`)"
         )) {
-            throw new \RuntimeException('Unable to link external product.');
+            throw new \RuntimeException(DbError::message('Unable to link external product'));
         }
     }
 
@@ -56,7 +56,7 @@ class ExternalProductRepository
     {
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . "pi_external_product` SET `imported_values` = '" . pSQL(ImportedValues::encode($importedValues))
             . "' WHERE `id_source` = " . (int) $idSource . " AND `external_id` = '" . pSQL($externalId, true) . "'")) {
-            throw new \RuntimeException('Unable to save imported values.');
+            throw new \RuntimeException(DbError::message('Unable to save imported values'));
         }
     }
 
@@ -64,7 +64,7 @@ class ExternalProductRepository
     public function resetImportedValues(int $idSource): void
     {
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'pi_external_product` SET `imported_values` = NULL, `feed_hash` = NULL WHERE `id_source` = ' . (int) $idSource)) {
-            throw new \RuntimeException('Unable to reset imported values.');
+            throw new \RuntimeException(DbError::message('Unable to reset imported values'));
         }
     }
 
@@ -83,7 +83,7 @@ class ExternalProductRepository
     {
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'pi_external_product` SET `feed_hash` = ' . ($hash === null ? 'NULL' : "'" . pSQL($hash) . "'")
             . ' WHERE `id_source` = ' . (int) $idSource . " AND `external_id` = '" . pSQL($externalId, true) . "'")) {
-            throw new \RuntimeException('Unable to save feed hash.');
+            throw new \RuntimeException(DbError::message('Unable to save feed hash'));
         }
     }
 
@@ -100,14 +100,14 @@ class ExternalProductRepository
             . " AND `external_id` = '" . pSQL($externalId, true) . "'")
             || !$db->execute('UPDATE `' . _DB_PREFIX_ . 'pi_external_combination` SET `id_run_last_seen` = ' . (int) $idRun . ' WHERE `id_source` = ' . (int) $idSource
             . ' AND `id_product` = ' . (int) $idProduct)) {
-            throw new \RuntimeException('Unable to mark unchanged product as seen.');
+            throw new \RuntimeException(DbError::message('Unable to mark unchanged product as seen'));
         }
     }
 
     public function unlink(int $idSource, string $externalId): void
     {
         if (!\Db::getInstance()->execute('DELETE FROM `' . _DB_PREFIX_ . 'pi_external_product` WHERE `id_source` = ' . (int) $idSource . " AND `external_id` = '" . pSQL($externalId, true) . "'")) {
-            throw new \RuntimeException('Unable to unlink external product.');
+            throw new \RuntimeException(DbError::message('Unable to unlink external product'));
         }
     }
 
@@ -116,7 +116,7 @@ class ExternalProductRepository
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_external_product` WHERE `id_source` = ' . (int) $idSource
             . ' AND (`id_run_last_seen` IS NULL OR `id_run_last_seen` <> ' . (int) $currentRunId . ')');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to find stale links.');
+            throw new \RuntimeException(DbError::message('Unable to find stale links'));
         }
         return $rows;
     }

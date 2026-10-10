@@ -34,7 +34,7 @@ class ImageSourceRepository
             'INSERT INTO `' . _DB_PREFIX_ . 'pi_image_source` (`id_product`, `url_hash`, `id_image`) VALUES ('
             . (int) $idProduct . ", '" . pSQL(self::hashUrl($url)) . "', " . (int) $idImage . ') ON DUPLICATE KEY UPDATE `id_image` = VALUES(`id_image`)'
         )) {
-            throw new \RuntimeException('Unable to record image source mapping.');
+            throw new \RuntimeException(DbError::message('Unable to record image source mapping'));
         }
     }
 

@@ -25,7 +25,7 @@ class ExternalCombinationRepository
             . (int) $idSource . ", '" . pSQL($externalId, true) . "', " . (int) $idProductAttribute . ", " . (int) $idProduct . ", " . ($idRun === null ? 'NULL' : (int) $idRun) . ', ' . $values . ", '" . pSQL(date('Y-m-d H:i:s'))
             . "') ON DUPLICATE KEY UPDATE `id_product_attribute` = VALUES(`id_product_attribute`), `id_product` = VALUES(`id_product`), `date_upd` = VALUES(`date_upd`), `id_run_last_seen` = COALESCE(VALUES(`id_run_last_seen`), `id_run_last_seen`), `imported_values` = COALESCE(VALUES(`imported_values`), `imported_values`)"
         )) {
-            throw new \RuntimeException('Unable to link external combination.');
+            throw new \RuntimeException(DbError::message('Unable to link external combination'));
         }
     }
 
@@ -33,7 +33,7 @@ class ExternalCombinationRepository
     public function resetImportedValues(int $idSource): void
     {
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'pi_external_combination` SET `imported_values` = NULL WHERE `id_source` = ' . (int) $idSource)) {
-            throw new \RuntimeException('Unable to reset imported values.');
+            throw new \RuntimeException(DbError::message('Unable to reset imported values'));
         }
     }
 
@@ -42,7 +42,7 @@ class ExternalCombinationRepository
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_external_combination` WHERE `id_source` = ' . (int) $idSource
             . ' AND (`id_run_last_seen` IS NULL OR `id_run_last_seen` <> ' . (int) $currentRunId . ')');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to find stale links.');
+            throw new \RuntimeException(DbError::message('Unable to find stale links'));
         }
         return $rows;
     }

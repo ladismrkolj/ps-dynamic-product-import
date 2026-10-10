@@ -9,7 +9,7 @@ class ManufacturerMappingRepository
     {
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` WHERE `id_source` = ' . (int) $idSource . ' ORDER BY `id_mapping`');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to list manufacturer mappings.');
+            throw new \RuntimeException(DbError::message('Unable to list manufacturer mappings'));
         }
         return $rows;
     }
@@ -32,7 +32,7 @@ class ManufacturerMappingRepository
             . (int) $idSource . ", '" . pSQL($name, true) . "', '" . $now . "', '" . $now
             . "') ON DUPLICATE KEY UPDATE `date_seen` = VALUES(`date_seen`), `date_upd` = VALUES(`date_upd`)"
         )) {
-            throw new \RuntimeException('Unable to record manufacturer name.');
+            throw new \RuntimeException(DbError::message('Unable to record manufacturer name'));
         }
     }
 
@@ -45,7 +45,7 @@ class ManufacturerMappingRepository
             . (int) $idSource . ", '" . pSQL($name, true) . "', " . ($idManufacturer === null ? 'NULL' : (int) $idManufacturer)
             . ", '" . pSQL(date('Y-m-d H:i:s')) . "')"
         )) {
-            throw new \RuntimeException('Unable to add brand mapping.');
+            throw new \RuntimeException(DbError::message('Unable to add brand mapping'));
         }
 
         return $db->Affected_Rows() > 0;
@@ -57,7 +57,7 @@ class ManufacturerMappingRepository
         if (!\Db::getInstance()->execute(
             'DELETE FROM `' . _DB_PREFIX_ . 'pi_manufacturer_mapping` WHERE `id_source` = ' . (int) $idSource . " AND `source_name` = '" . pSQL($name, true) . "'"
         )) {
-            throw new \RuntimeException('Unable to delete brand mapping.');
+            throw new \RuntimeException(DbError::message('Unable to delete brand mapping'));
         }
     }
 
@@ -70,7 +70,7 @@ class ManufacturerMappingRepository
             . ", `date_upd` = '" . pSQL(date('Y-m-d H:i:s')) . "' WHERE `id_source` = " . (int) $idSource
             . " AND `source_name` = '" . pSQL($name, true) . "'"
         )) {
-            throw new \RuntimeException('Unable to save manufacturer override.');
+            throw new \RuntimeException(DbError::message('Unable to save manufacturer override'));
         }
     }
 
@@ -82,7 +82,7 @@ class ManufacturerMappingRepository
             . (int) $idSource . ", '" . pSQL($name, true) . "', " . ($idManufacturer === null ? 'NULL' : (int) $idManufacturer)
             . ", '" . pSQL(date('Y-m-d H:i:s')) . "') ON DUPLICATE KEY UPDATE `id_manufacturer` = VALUES(`id_manufacturer`), `date_upd` = VALUES(`date_upd`)"
         )) {
-            throw new \RuntimeException('Unable to save imported brand mapping.');
+            throw new \RuntimeException(DbError::message('Unable to save imported brand mapping'));
         }
     }
 
@@ -91,7 +91,7 @@ class ManufacturerMappingRepository
     {
         $rows = \Db::getInstance()->executeS('SELECT `id_manufacturer`, `name` FROM `' . _DB_PREFIX_ . "manufacturer` WHERE `name` = '" . pSQL($name) . "'");
         if ($rows === false) {
-            throw new \RuntimeException('Unable to look up manufacturers.');
+            throw new \RuntimeException(DbError::message('Unable to look up manufacturers'));
         }
 
         return array_column($rows, 'name', 'id_manufacturer');

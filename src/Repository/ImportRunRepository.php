@@ -9,7 +9,7 @@ class ImportRunRepository
     public function start(int $idSource, string $triggeredBy): int
     {
         if (!\Db::getInstance()->execute('INSERT INTO `' . _DB_PREFIX_ . 'pi_import_run` (`id_source`, `started_at`, `status`, `triggered_by`) VALUES (' . (int) $idSource . ", NOW(), '" . pSQL('running') . "', '" . pSQL($triggeredBy) . "')")) {
-            throw new \RuntimeException('Unable to start import run.');
+            throw new \RuntimeException(DbError::message('Unable to start import run'));
         }
         return (int) \Db::getInstance()->Insert_ID();
     }
@@ -21,7 +21,7 @@ class ImportRunRepository
             $sets[] = '`' . $key . '_count` = ' . (int) max(0, $counts[$key] ?? 0);
         }
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'pi_import_run` SET ' . implode(', ', $sets) . ' WHERE `id_run` = ' . (int) $idRun)) {
-            throw new \RuntimeException('Unable to finish import run.');
+            throw new \RuntimeException(DbError::message('Unable to finish import run'));
         }
     }
 
@@ -53,7 +53,7 @@ class ImportRunRepository
             'UPDATE `' . _DB_PREFIX_ . "pi_import_run` SET `status` = 'failed', `finished_at` = NOW(), `error_log` = CONCAT_WS('\\n', NULLIF(`error_log`, ''), '"
             . pSQL(self::INTERRUPTED_MESSAGE) . "') WHERE `status` = 'running'"
         )) {
-            throw new \RuntimeException('Unable to reap stuck import runs.');
+            throw new \RuntimeException(DbError::message('Unable to reap stuck import runs'));
         }
 
         return (int) $db->Affected_Rows();
@@ -67,7 +67,7 @@ class ImportRunRepository
         $ids = implode(', ', array_map('intval', $sourceIds));
         $rows = \Db::getInstance()->executeS('SELECT r.*, s.`name` AS `source_name` FROM `' . _DB_PREFIX_ . 'pi_import_run` r LEFT JOIN `' . _DB_PREFIX_ . 'pi_source` s ON s.`id_source` = r.`id_source` WHERE r.`id_run` > ' . (int) $baseline . ' AND r.`id_source` IN (' . $ids . ') ORDER BY r.`id_run` ASC');
         if ($rows === false) {
-            throw new \RuntimeException('Unable to read import runs.');
+            throw new \RuntimeException(DbError::message('Unable to read import runs'));
         }
         return $rows;
     }
@@ -86,7 +86,7 @@ class ImportRunRepository
     {
         $rows = \Db::getInstance()->executeS('SELECT r.*, s.`name` AS `source_name` FROM `' . _DB_PREFIX_ . 'pi_import_run` r LEFT JOIN `' . _DB_PREFIX_ . 'pi_source` s ON s.`id_source` = r.`id_source`' . $where . ' ORDER BY r.`id_run` DESC LIMIT ' . (int) max(1, min(1000, $limit)));
         if ($rows === false) {
-            throw new \RuntimeException('Unable to read import runs.');
+            throw new \RuntimeException(DbError::message('Unable to read import runs'));
         }
         return $rows;
     }

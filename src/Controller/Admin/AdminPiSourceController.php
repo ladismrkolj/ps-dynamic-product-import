@@ -53,13 +53,13 @@ class AdminPiSourceController extends ModuleAdminController
             }
             if ($deleting) {
                 if ($id <= 0 || !$this->sources->delete($id)) {
-                    throw new RuntimeException('Unable to delete source.');
+                    throw new RuntimeException(\ProductImport\Repository\DbError::message('Unable to delete source'));
                 }
             } else {
                 $data = $this->readSubmission();
                 if ($id > 0) {
                     if (!$this->sources->update($id, $data)) {
-                        throw new RuntimeException('Unable to update source.');
+                        throw new RuntimeException(\ProductImport\Repository\DbError::message('Unable to update source'));
                     }
                 } else {
                     $id = $this->sources->create($data);
@@ -503,7 +503,7 @@ class AdminPiSourceController extends ModuleAdminController
             $idSource = (int) $source['id_source'];
             if ($default) {
                 if (!$this->sources->update($idSource, ['default_' . $idColumn => $id])) {
-                    throw new RuntimeException('Unable to save default.');
+                    throw new RuntimeException(\ProductImport\Repository\DbError::message('Unable to save default'));
                 }
             } else {
                 $key = Tools::getValue('key');
@@ -623,10 +623,10 @@ class AdminPiSourceController extends ModuleAdminController
     public function initContent()
     {
         // Render explicitly: there is no source ObjectModel for AdminController to load.
-        $this->content = '';
+        $this->content = $this->access('view') ? \ProductImport\Repository\SchemaStatus::alertHtml() : '';
         if (Tools::isSubmit('addpi_source') || Tools::isSubmit('updatepi_source') || Tools::isSubmit('submitAddpi_source')) {
             if ($this->access((int) Tools::getValue('id_source') > 0 ? 'edit' : 'add')) {
-                $this->content = $this->renderForm();
+                $this->content .= $this->renderForm();
             }
         } elseif ($this->access('view')) {
             if ($this->access('add')) {
@@ -1144,7 +1144,7 @@ class AdminPiSourceController extends ModuleAdminController
                 if ($overwrite) {
                     $idSource = (int) $existing['id_source'];
                     if ($resolved['source'] !== [] && !$this->sources->update($idSource, $resolved['source'])) {
-                        throw new RuntimeException('Unable to update the source.');
+                        throw new RuntimeException(\ProductImport\Repository\DbError::message('Unable to update the source'));
                     }
                 } else {
                     $idSource = $this->sources->create($resolved['source']);
