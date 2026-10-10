@@ -1,9 +1,10 @@
 {literal}
 <style>
-#pi-reference-details > summary.pi-ref-toggle, #pi-reference-toggle { list-style: none; display: inline-block; cursor: pointer; margin-bottom: 8px; }
-#pi-reference-toggle::-webkit-details-marker { display: none; }
-#pi-reference-toggle .pi-ref-caret { vertical-align: middle; font-size: 20px; line-height: 1; transition: transform .15s; }
-#pi-reference-details[open] > #pi-reference-toggle .pi-ref-caret { transform: rotate(180deg); }
+#pi-reference-details > summary.pi-ref-toggle, #pi-reference-toggle, #pi-formula-help-toggle { list-style: none; display: inline-block; cursor: pointer; margin-bottom: 8px; }
+#pi-reference-toggle::-webkit-details-marker, #pi-formula-help-toggle::-webkit-details-marker { display: none; }
+#pi-reference-toggle .pi-ref-caret, #pi-formula-help-toggle .pi-ref-caret { vertical-align: middle; font-size: 20px; line-height: 1; transition: transform .15s; }
+#pi-reference-details[open] > #pi-reference-toggle .pi-ref-caret, #pi-formula-help[open] > #pi-formula-help-toggle .pi-ref-caret { transform: rotate(180deg); }
+.pi-formula-help-link { margin-left: 6px; font-weight: bold; }
 #pi-grid-root .pi-grid-toolbar { margin-bottom: 8px; }
 #pi-grid-root .pi-grid-toolbar > * { margin-right: 8px; vertical-align: middle; }
 #pi-grid-root table td, #pi-grid-root table th { vertical-align: top; }
@@ -313,7 +314,22 @@
         textarea.dispatchEvent(new Event('input', {bubbles: true}));
       });
       wrap.appendChild(select);
+      var help = document.createElement('a');
+      help.href = '#pi-formula-help';
+      help.className = 'pi-formula-help-link';
+      help.textContent = '?';
+      help.setAttribute('aria-label', 'Formula syntax help');
+      help.addEventListener('click', function (event) {
+        event.preventDefault();
+        var tab = document.getElementById('pi-products-link');
+        var details = document.getElementById('pi-formula-help');
+        if (tab && !tab.parentElement.classList.contains('active')) tab.click();
+        details.open = true;
+        details.scrollIntoView({block: 'start'});
+        document.getElementById('pi-formula-help-toggle').focus();
+      });
       wrap.appendChild(button);
+      wrap.appendChild(help);
       fill();
       return {element: wrap, refresh: fill};
     }
@@ -542,6 +558,10 @@
     var filterField = form.querySelector('[name="filter_expression"]');
     var filterHelper = insertHelper(filterField, productInserts);
     filterField.insertAdjacentElement('afterend', filterHelper.element);
+    var formulaHelp = document.getElementById('pi-formula-help');
+    formulaHelp.addEventListener('toggle', function () {
+      document.getElementById('pi-formula-help-label').textContent = (formulaHelp.open ? 'Hide' : 'Show') + ' formula syntax';
+    });
 
     // ---- State ----
     function variantsExpression() {

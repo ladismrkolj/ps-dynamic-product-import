@@ -32,6 +32,19 @@ class ExpressionEvaluatorTest extends TestCase
             ['first(["Sails", "Boards"])', [], 'Sails'], ['first([])', [], null],
             ['first(null)', [], null], ['first("Sails")', [], null],
             ['first(fields)', ['named' => ['title' => 'Sails']], ['title' => 'Sails']],
+            ['lower("ČAJ")', [], 'čaj'], ['upper("čaj ß")', [], 'ČAJ SS'], ['lower(null)', [], null], ['upper(null)', [], null],
+            ['lower(12)', [], '12'],
+            ["trim(\"  \u{00A0}Čaj\n \")", [], 'Čaj'], ['trim("")', [], ''], ['trim(null)', [], null],
+            ['replace("a-b-c", "-", "+")', [], 'a+b+c'], ['replace("a.b", ".", "")', [], 'ab'],
+            ['replace("a.b", "/./", "x")', [], 'a.b'], ['replace(null, "a", "b")', [], null],
+            ['round(2.5)', [], 3.0], ['round(-2.5)', [], -3.0], ['round(1.2345, 2)', [], 1.23],
+            ['round(1.235, 2)', [], 1.24], ['round("12.345", 1)', [], 12.3], ['round(1234, -2)', [], 1200.0],
+            ['round(null)', [], null], ['round(num("x"))', [], null],
+            ['join(["a", null, "", "b", 3], "|")', [], 'a|b|3'], ['join(["a", "b"])', [], 'a, b'],
+            ['join([null, ""])', [], ''], ['join(null)', [], null],
+            ['count([1, 2, 3])', [], 3], ['count([])', [], 0], ['count(null)', [], 0],
+            ['count(path(fields, "missing"))', [], 0],
+            ['"it\'s" ~ \'it\\\'s\'', [], "it'sit's"],
         ];
     }
 
@@ -50,6 +63,24 @@ class ExpressionEvaluatorTest extends TestCase
 
     public static function brokenExpressions(): array
     {
-        return [['fields['], ['unknown_function()'], ['path(fields, [])'], ['1 / 0'], ['regex("/[invalid/", "value")'], ['str([])']];
+        return [
+            ['fields['], ['unknown_function()'], ['path(fields, [])'], ['1 / 0'], ['regex("/[invalid/", "value")'], ['str([])'],
+            ['lower([])'], ['upper([1])'], ['trim([])'], ['replace("a", [], "b")'], ['replace("a", null, "b")'],
+            ['round("abc")'], ['round(true)'], ['round([1])'], ['round(1.5, 1.5)'], ['round(1.5, "x")'],
+            ['join("a")'], ['join([[1]])'], ['join([1], [])'], ['count("a")'], ['count(5)'],
+        ];
+    }
+
+    public function testHelperErrorMessagesAreClear(): void
+    {
+        $evaluator = new ExpressionEvaluator();
+        foreach (['round("abc")' => 'wrap text in num()', 'join([[1]])' => 'join() expects', 'count("a")' => 'count() expects'] as $expression => $message) {
+            try {
+                $evaluator->evaluate($expression, ['fields' => []]);
+                self::fail('Expected failure for ' . $expression);
+            } catch (ExpressionEvaluationException $error) {
+                self::assertStringContainsString($message, $error->getMessage());
+            }
+        }
     }
 }

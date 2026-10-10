@@ -79,12 +79,37 @@ On Product fields > **Variants (optional)**, pick a **Variants list** (a list of
 
 Expressions use Symfony ExpressionLanguage. Product mappings see `fields`, the whole item. Variant mappings also see `variant`.
 
-Helpers:
-- `path(data, 'a.b.0.c')` walks nested keys. A missing key gives `null`, never an error.
-- `num(x)` gives a float or `null`. It accepts PHP numeric values and strings, not localized currency strings.
-- `str(x)` gives a string. It accepts scalars, stringable objects and `null`.
-- `regex('/pattern/', value)` returns true if the pattern matches (false for `null`). A malformed pattern is an error.
-- `first(list)` returns a list's first element.
+Formula syntax (the same table is in the **Formula syntax** toggle at the top of the Product fields tab):
+
+| Symbol or function | Meaning and example |
+|---|---|
+| `fields['x']` | Feed field `x` of the product. A missing field is `null`, not an error. `fields.x` does not work; always use brackets. |
+| `variant['x']` | Field `x` of one variants entry (variant formulas only). |
+| `path(fields, 'a.b')` | Walks nested keys, for example `path(fields, 'prices.retail')` or `path(fields, 'images.0')`. A missing key gives `null`. |
+| `~` | Joins text: `fields['brand'] ~ ' ' ~ fields['model']` |
+| `+ - * / % **` | Math, `**` is power: `num(fields['price']) * 1.22` |
+| `== != < > <= >=` | Comparison: `num(fields['stock']) > 0` |
+| `and or not` | Logic (`&&` `\|\|` `!` also work): `fields['active'] == 'yes' and not fields['hidden']` |
+| `a ? b : c` | If `a` is true then `b`, else `c`: `num(fields['stock']) > 0 ? 1 : 0` |
+| `a ?: b` | Uses `b` when `a` is empty: null, `''`, `0`, `false` or an empty list. `fields['sale'] ?: fields['price']` |
+| `a ?? b` | Uses `b` only when `a` is null or missing; keeps `''` and `0`. `fields['stock'] ?? 0` |
+| `matches` | Regular expression test: `fields['name'] matches '/^Kite/i'` |
+| `starts with`, `ends with`, `contains` | Plain text tests: `fields['sku'] starts with 'A-'`, `fields['name'] contains 'Pro'` |
+| `in`, `not in`, `..` | List and range membership: `fields['size'] in ['S', 'M']`, `num(fields['qty']) in 1..5`, `fields['brand'] not in ['Nike']` |
+| `[ ]`, `{a: 1}` | List and map literals: `[fields['main'], path(fields, 'extra')]`, `{'S': 1, 'M': 2}[fields['size']]` |
+| `num(x)` | Number, or `null` if not numeric: `num(fields['price'])`. Accepts PHP numeric values and strings, not localized currency strings. |
+| `str(x)` | Text: `str(fields['id'])`. Accepts scalars, stringable objects and `null`. |
+| `regex('/p/', x)` | True if the pattern matches (false for `null`): `regex('/^A\d+$/', fields['sku'])`. A malformed pattern is an error. |
+| `first(list)` | First entry of a list: `first(fields['images'])` |
+| `lower(s)`, `upper(s)` | Change case, accents included: `lower('ČAJ')` gives `čaj` |
+| `trim(s)` | Removes spaces at both ends: `trim(fields['name'])` |
+| `replace(s, search, with)` | Replaces plain text, not a pattern: `replace(fields['name'], '-', ' ')` |
+| `round(n, decimals)` | Rounds half up, decimals default 0: `round(num(fields['price']) * 1.22, 2)` |
+| `join(list, sep)` | Joins a list, skipping empty entries; separator defaults to `', '`: `join([fields['a'], fields['b']], ' / ')` |
+| `count(list)` | Number of entries, 0 for a missing list: `count(fields['images'])` |
+| Quoting | Write text in single quotes. Put a backslash before a quote inside the text: `'it\'s'`. Doubling the quote (`'it''s'`) does not work. A backslash itself is written `\\`. |
+
+The text helpers return `null` for `null`, so a missing field leaves the PrestaShop field empty. `round` needs a number: wrap text in `num()`. `join` of a missing list is `null`; a list with a non-scalar entry is an error, as is `count` of a non-list.
 
 Plain `fields['x']` also evaluates to `null` when the top-level key is missing. A failing field is set to `null` and reported as an error, and the other fields are kept. A malformed expression is checked when it is evaluated, not when you save, so work in progress can be saved. A broken filter raises the same error.
 

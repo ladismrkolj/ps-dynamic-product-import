@@ -11,7 +11,7 @@ class ExpressionEvaluator
     public function __construct()
     {
         $this->language = new ExpressionLanguage();
-        foreach (['path', 'num', 'str', 'regex', 'first'] as $name) {
+        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count'] as $name) {
             $this->language->register(
                 $name,
                 static function (...$arguments) use ($name) {
@@ -84,5 +84,113 @@ class ExpressionEvaluator
     public static function first($list)
     {
         return is_array($list) && $list !== [] ? reset($list) : null;
+    }
+
+    public static function lower($value): ?string
+    {
+        $text = self::text('lower', $value);
+
+        return $text === null ? null : mb_strtolower($text, 'UTF-8');
+    }
+
+    public static function upper($value): ?string
+    {
+        $text = self::text('upper', $value);
+
+        return $text === null ? null : mb_strtoupper($text, 'UTF-8');
+    }
+
+    public static function trim($value): ?string
+    {
+        $text = self::text('trim', $value);
+        if ($text === null) {
+            return null;
+        }
+        $trimmed = preg_replace('/^[\pZ\s]+|[\pZ\s]+$/u', '', $text);
+        if ($trimmed === null) {
+            throw new \InvalidArgumentException('trim() expects valid UTF-8 text.');
+        }
+
+        return $trimmed;
+    }
+
+    public static function replace($value, $search, $with): ?string
+    {
+        $text = self::text('replace', $value);
+        if ($text === null) {
+            return null;
+        }
+        $from = self::text('replace', $search);
+        $to = self::text('replace', $with);
+        if ($from === null || $to === null) {
+            throw new \InvalidArgumentException('replace() needs text for the search and replacement arguments.');
+        }
+
+        return str_replace($from, $to, $text);
+    }
+
+    public static function round($value, $decimals = 0): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_bool($value) || !is_numeric($value)) {
+            throw new \InvalidArgumentException('round() expects a number; wrap text in num() first.');
+        }
+        if (is_bool($decimals) || !is_numeric($decimals) || (float) $decimals != (int) $decimals) {
+            throw new \InvalidArgumentException('round() expects a whole number of decimals.');
+        }
+
+        return round((float) $value, (int) $decimals, PHP_ROUND_HALF_UP);
+    }
+
+    public static function join($list, $separator = ', '): ?string
+    {
+        if ($list === null) {
+            return null;
+        }
+        if (!is_array($list)) {
+            throw new \InvalidArgumentException('join() expects a list.');
+        }
+        $separatorText = self::text('join', $separator);
+        if ($separatorText === null) {
+            throw new \InvalidArgumentException('join() expects text as the separator.');
+        }
+        $parts = [];
+        foreach ($list as $entry) {
+            if ($entry === null || $entry === '') {
+                continue;
+            }
+            if (!is_scalar($entry)) {
+                throw new \InvalidArgumentException('join() expects a list of text or numbers.');
+            }
+            $parts[] = (string) $entry;
+        }
+
+        return implode($separatorText, $parts);
+    }
+
+    public static function count($list): int
+    {
+        if ($list === null) {
+            return 0;
+        }
+        if (!is_array($list)) {
+            throw new \InvalidArgumentException('count() expects a list.');
+        }
+
+        return count($list);
+    }
+
+    private static function text(string $function, $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_scalar($value) && !(is_object($value) && method_exists($value, '__toString'))) {
+            throw new \InvalidArgumentException($function . '() expects a scalar or stringable value.');
+        }
+
+        return (string) $value;
     }
 }
