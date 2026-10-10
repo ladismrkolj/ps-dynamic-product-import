@@ -16,7 +16,7 @@ class ImportRunnerTest extends TestCase
         $state = $sharedState ?? (object) ['products' => ['old' => ['external_id' => 'old', 'id_product' => 10, 'id_run_last_seen' => null], 'stale' => ['external_id' => 'stale', 'id_product' => 11, 'id_run_last_seen' => 1]],
             'combinations' => ['old:stale' => ['id_product' => 10, 'id_product_attribute' => 50, 'id_run_last_seen' => null]],
             'triggers' => [], 'deactivated' => [], 'zeroed' => [], 'finished' => [], 'prices' => [], 'staleCalls' => 0, 'emptyStreakUpdates' => [],
-            'activeInStore' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => []];
+            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => []];
         $fetcher = static function (array $source) use ($items, $fetchFails): array {
             if ($fetchFails) {
                 throw new \RuntimeException('fetch failed');
@@ -115,6 +115,7 @@ class ImportRunnerTest extends TestCase
             public function import(int $source, string $external, array $values, array $categories, ?int $manufacturer, ?int $supplier, int $language): int
             {
                 $this->state->imports[] = $external;
+                $this->state->importValues[$external] = $values;
                 if ($external === 'broken') {
                     throw new \RuntimeException('save failed');
                 }
@@ -156,9 +157,10 @@ class ImportRunnerTest extends TestCase
             public function __construct(private object $state)
             {
             }
-            public function import(int $source, string $parent, string $variant, int $product, float $price, array $fields, array $ids): int
+            public function import(int $source, string $parent, string $variant, int $product, float $price, array $fields, array $ids, ?int $idSupplier = null): int
             {
                 $this->state->prices[] = $price;
+                $this->state->variantFields[] = $fields;
                 TestCase::assertSame([6], $ids);
                 if ($variant === 'bad') {
                     throw new \RuntimeException('variant failed');
@@ -182,6 +184,11 @@ class ImportRunnerTest extends TestCase
                 }
                 $this->state->deactivated[] = $idProduct;
                 return true;
+            }
+            public function productIdByReference(string $reference, ?int $exceptProduct = null): ?int
+            {
+                $owner = $this->state->references[$reference] ?? null;
+                return $owner !== null && $owner !== $exceptProduct ? $owner : null;
             }
             public function zeroCombination(int $idProduct, int $idCombination): void
             {
@@ -421,5 +428,37 @@ class ImportRunnerTest extends TestCase
         self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 3]], $source, [3], 4, '1'));
         self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 5, '1'));
         self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 4, '2'));
+    }
+
+    public function testInvalidEan13IsDroppedAndLogged(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'ean' => '4006381333932'], ['id' => 'old', 'ean' => '4006381333931'], ['id' => 'x2', 'ean' => null]]);
+        $source = $this->source(['field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]', 'ean13' => 'fields["ean"]']]);
+        $result = $runner->runOne($source, 'admin-manual');
+        self::assertArrayNotHasKey('ean13', $state->importValues['new']);
+        self::assertSame('4006381333931', $state->importValues['old']['ean13']);
+        self::assertSame('invalid EAN-13 "4006381333932" (check digit) — not written', trim(explode('field ean13: ', $result['error_log'])[1]));
+        self::assertSame(1, substr_count($result['error_log'], 'ean13'));
+    }
+
+    public function testInvalidVariantEan13IsDropped(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old', 'variants' => [['sku' => 'a', 'ean' => '12345678905'], ['sku' => 'b', 'ean' => '4006381333931']]]]);
+        $result = $runner->runOne($this->source(['variant_mapping' => ['variants_expression' => 'fields["variants"]', 'attributes' => [['name' => 'Size', 'expression' => '"M"']], 'fields' => ['reference' => 'variant["sku"]', 'ean13' => 'variant["ean"]']]]), 'admin-manual');
+        self::assertArrayNotHasKey('ean13', $state->variantFields[0]);
+        self::assertSame('4006381333931', $state->variantFields[1]['ean13']);
+        self::assertStringContainsString('item 0 variant 0 field ean13: invalid EAN-13 "12345678905" (length 11) — not written', $result['error_log']);
+    }
+
+    public function testReferenceUsedByAnotherProductIsNotWritten(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'ref' => 'SKU-1'], ['id' => 'old', 'ref' => 'SKU-2']]);
+        $state->references = ['SKU-1' => 99, 'SKU-2' => 10];
+        $source = $this->source(['field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]', 'reference' => 'fields["ref"]']]);
+        $result = $runner->runOne($source, 'admin-manual');
+        self::assertArrayNotHasKey('reference', $state->importValues['new']);
+        self::assertSame('SKU-2', $state->importValues['old']['reference']);
+        self::assertStringContainsString('item 0 field reference: "SKU-1" is already used by product #99 — not written', $result['error_log']);
+        self::assertSame(1, substr_count($result['error_log'], 'field reference'));
     }
 }

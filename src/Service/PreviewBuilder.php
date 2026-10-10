@@ -49,6 +49,9 @@ class PreviewBuilder
         }
         // Continue even when excluded or broken so configuration mistakes remain visible.
         $result['base'] = $this->mapper->map($item, $source['field_mapping']);
+        if (($warning = Gtin::warning($result['base']['values']['ean13'] ?? null)) !== null) {
+            $result['base']['errors']['ean13'] = $warning;
+        }
         $values = $result['base']['values'];
         if (isset($values['category_paths'])) {
             try {
@@ -74,6 +77,9 @@ class PreviewBuilder
             foreach (array_slice($variants, 0, self::VARIANT_LIMIT) as $index => $variant) {
                 $attributes = $this->variants->mapAttributes($item, $variant, $configuration['attributes']);
                 $fields = $this->variants->mapFields($item, $variant, $configuration['fields']);
+                if (($warning = Gtin::warning($fields['values']['ean13'] ?? null)) !== null) {
+                    $fields['errors']['ean13'] = $warning;
+                }
                 $resolutions = [];
                 foreach ($attributes['values'] as $group => $value) {
                     if (isset($attributes['errors'][$group])) {
@@ -101,19 +107,46 @@ class PreviewBuilder
      * Dry-run preview of many items with the (possibly unsaved) mapping in $source: one row per item,
      * one cell per mapped target. Cell values are display strings (null stays null). No writes.
      *
+     * @param (callable(string, array): ?int)|null $referenceOwner id of an existing product, other than the one linked
+     *                                                             to the item, that holds the reference; null skips the check
+     *
      * @return array{targets: list<string>, rows: list<array<string, mixed>>}
      */
-    public function table(array $source, array $items, int $limit = self::TABLE_LIMIT): array
+    public function table(array $source, array $items, int $limit = self::TABLE_LIMIT, ?callable $referenceOwner = null): array
     {
         $targets = array_keys($source['field_mapping']);
         $rows = [];
-        foreach (array_slice($items, 0, $limit, true) as $index => $item) {
+        $previewed = array_slice($items, 0, $limit, true);
+        $duplicates = [];
+        if (isset($source['field_mapping']['reference'])) {
+            $references = [];
+            foreach ($previewed as $index => $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                try {
+                    $references[$index] = $this->mapper->map($item, ['reference' => $source['field_mapping']['reference']])['values']['reference'] ?? null;
+                } catch (\Throwable) {
+                }
+            }
+            $duplicates = ReferenceCheck::feedDuplicates($references);
+        }
+        foreach ($previewed as $index => $item) {
             if (!is_array($item)) {
                 $rows[] = ['index' => $index, 'included' => null, 'cells' => [], 'notes' => ['item' => 'Item is not an object.'],
                     'variants' => ['total' => 0, 'truncated' => 0, 'errors' => 0, 'items' => []]];
                 continue;
             }
             $result = $this->build($source, $item);
+            $reference = $result['base']['values']['reference'] ?? null;
+            if (isset($duplicates[$index])) {
+                $result['base']['errors']['reference'] = '"' . $reference . '" is already used by feed item ' . $duplicates[$index] . ' — not written';
+            } elseif ($referenceOwner !== null && is_scalar($reference) && trim((string) $reference) !== '' && !isset($result['base']['errors']['reference'])) {
+                $owner = $referenceOwner((string) $reference, $item);
+                if ($owner !== null) {
+                    $result['base']['errors']['reference'] = ReferenceCheck::usedByProduct((string) $reference, $owner);
+                }
+            }
             $cells = [];
             foreach ($targets as $target) {
                 $cells[$target] = ['value' => self::display($result['base']['values'][$target] ?? null), 'error' => $result['base']['errors'][$target] ?? null];
@@ -125,7 +158,7 @@ class PreviewBuilder
             foreach ($result['variants']['items'] as $variant) {
                 $variantErrors += count($variant['fields']['errors']) + count($variant['attributes']['errors']);
                 $variantCells = [];
-                foreach (['reference', 'ean13', 'price', 'quantity', 'active', 'image'] as $field) {
+                foreach (['reference', 'ean13', 'mpn', 'price', 'quantity', 'active', 'image'] as $field) {
                     $variantCells[$field] = ['value' => self::display($variant['fields']['values'][$field] ?? null), 'error' => $variant['fields']['errors'][$field] ?? null];
                 }
                 $attributes = [];

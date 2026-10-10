@@ -12,8 +12,8 @@
 #pi-grid-root .pi-map select { max-width: 100%; }
 #pi-grid-root .pi-map textarea { width: 100%; }
 #pi-grid-root .pi-map .pi-target-help { display: block; color: #666; margin-top: 2px; }
-#pi-grid-root .pi-formula-box { margin-top: 6px; }
-#pi-grid-root .pi-formula-box > * { margin-right: 6px; }
+#pi-grid-root .pi-formula-box, #pi-grid-root .pi-pattern-box { margin-top: 6px; }
+#pi-grid-root .pi-formula-box > *, #pi-grid-root .pi-pattern-box > * { margin-right: 6px; }
 #pi-grid-root details { margin-bottom: 16px; }
 #pi-configuration-panel .pi-cell-error { background: #f2dede; outline: 1px solid #a94442; }
 #pi-configuration-panel .pi-preview-scroll { overflow-x: auto; max-width: 100%; }
@@ -33,13 +33,14 @@
   // [name, badge, description]
   var PRODUCT_TARGETS = [
     ['name', 'required for new products', 'Product name.'],
-    ['reference', 'recommended', 'Product reference (SKU).'],
+    ['reference', 'recommended', 'Visible product code (SKU). Imports skip a reference already used by another product.'],
     ['price', 'recommended', 'Selling price.'],
     ['regular_price', '', 'Original price; when higher than price, price is applied as a discount.'],
     ['wholesale_price', '', 'Purchase price.'],
     ['short_description', '', 'Short description (HTML allowed).'],
     ['description', '', 'Long description (HTML allowed).'],
-    ['ean13', '', 'EAN-13 barcode.'],
+    ['ean13', '', 'EAN-13 barcode: exactly 13 digits with a valid check digit; invalid values are not written.'],
+    ['mpn', '', 'Manufacturer part number; with the brand it identifies the same product across suppliers'],
     ['weight', '', 'Weight.'],
     ['quantity', '', 'Stock quantity.'],
     ['active', '', 'Enabled flag; false disables the product.'],
@@ -52,7 +53,8 @@
   var LIST_TARGETS = ['images', 'category_paths'];
   var VARIANT_TARGETS = [
     ['reference', 'required for variants', 'Combination reference (SKU).'],
-    ['ean13', '', 'Combination EAN-13.'],
+    ['ean13', '', 'Combination EAN-13: exactly 13 digits with a valid check digit; invalid values are not written.'],
+    ['mpn', '', 'Manufacturer part number; with the brand it identifies the same product across suppliers'],
     ['price', '', 'Absolute combination price.'],
     ['quantity', '', 'Combination stock.'],
     ['active', '', 'false sets zero stock.'],
@@ -382,6 +384,39 @@
         row.textarea.value = match ? '' : expression;
         row.box.style.display = row.select.value === '__formula__' ? '' : 'none';
       }
+      // 'Use pattern: prefix + feed field' fills the formula; the saved result is the same as typing it.
+      function addPattern(row, cell) {
+        var box = document.createElement('div');
+        box.className = 'pi-pattern-box';
+        box.appendChild(document.createTextNode('Use pattern: '));
+        var prefix = document.createElement('input');
+        prefix.type = 'text';
+        prefix.size = 10;
+        prefix.setAttribute('aria-label', 'Reference prefix');
+        var key = form.querySelector('[name="technical_key"]');
+        prefix.value = key && key.value.trim() ? key.value.trim().toUpperCase() + '-' : '';
+        box.appendChild(prefix);
+        box.appendChild(document.createTextNode('+'));
+        var field = document.createElement('select');
+        field.setAttribute('aria-label', 'Feed field for the reference pattern');
+        options.forEach(function (option) { field.add(new Option(option.label, option.value)); });
+        box.appendChild(field);
+        var apply = document.createElement('button');
+        apply.type = 'button';
+        apply.className = 'btn btn-default btn-sm';
+        apply.textContent = 'Use pattern';
+        apply.addEventListener('click', function () {
+          var option = optionByValue[field.value];
+          if (!option) return;
+          row.select.value = '__formula__';
+          row.textarea.value = quote(prefix.value) + ' ~ ' + option.forms('reference')[0];
+          row.box.style.display = '';
+          row.textarea.dispatchEvent(new Event('input', {bubbles: true}));
+          row.select.dispatchEvent(new Event('change', {bubbles: true}));
+        });
+        box.appendChild(apply);
+        cell.appendChild(box);
+      }
       function addRow(spec) {
         var row = {custom: spec.custom, fixedName: spec.target};
         var tr = tbody.insertRow();
@@ -443,6 +478,7 @@
         row.box.appendChild(row.helper.element);
         addSampler(row.box, row.textarea);
         cell.appendChild(row.box);
+        if (cfg.referencePattern && spec.target === 'reference') addPattern(row, cell);
         row.select.addEventListener('change', function () {
           var current = row.select.value;
           row.box.style.display = current === '__formula__' ? '' : 'none';
@@ -490,7 +526,7 @@
     }
 
     var pEditor = mapEditor({
-      container: document.getElementById('pi-product-map'), heading: 'PrestaShop field', targets: PRODUCT_TARGETS,
+      container: document.getElementById('pi-product-map'), heading: 'PrestaShop field', targets: PRODUCT_TARGETS, referencePattern: true,
       options: productOptions, inserts: productInserts, addLabel: '+ Add custom PrestaShop field', placeholder: 'Custom field name'
     });
     var vfEditor = mapEditor({
@@ -788,7 +824,7 @@
       var table = document.createElement('table');
       table.className = 'table table-condensed pi-variant-table';
       var head = table.createTHead().insertRow();
-      ['Attributes', 'Reference', 'EAN-13', 'Price (impact)', 'Quantity', 'Active', 'Image'].forEach(function (title) {
+      ['Attributes', 'Reference', 'EAN-13', 'MPN', 'Price (impact)', 'Quantity', 'Active', 'Image'].forEach(function (title) {
         var th = document.createElement('th');
         th.scope = 'col';
         th.textContent = title;
@@ -810,7 +846,7 @@
           attributeCell.className = 'pi-cell-error';
           attributeCell.title = errors.map(function (attribute) { return attribute.name + ': ' + attribute.error; }).join('; ');
         }
-        ['reference', 'ean13'].forEach(function (field) { setCell(vr.insertCell(), variant.cells[field]); });
+        ['reference', 'ean13', 'mpn'].forEach(function (field) { setCell(vr.insertCell(), variant.cells[field]); });
         var priceCell = vr.insertCell();
         setCell(priceCell, variant.cells.price);
         if (!variant.cells.price.error && variant.cells.price.value !== null && variant.price_impact !== null) {
@@ -844,6 +880,7 @@
       previewButton.disabled = true;
       output.textContent = 'Building preview…';
       var body = mappingBody(feedBody('previewTable', false));
+      body.set('identifier_field', identifier.value.trim());
       body.set('filter_expression', form.querySelector('[name="filter_expression"]').value);
       post(body).then(function (data) {
         output.replaceChildren();

@@ -77,6 +77,12 @@ class ImportRunner
                     $this->log($log, "item $index field $field: $error");
                 }
                 $values = $mapped['values'];
+                if (($warning = Gtin::warning($values['ean13'] ?? null)) !== null) {
+                    unset($values['ean13']);
+                    $this->log($log, "item $index field ean13: $warning");
+                } elseif (is_scalar($values['ean13'] ?? null)) {
+                    $values['ean13'] = trim((string) $values['ean13']);
+                }
                 $categoryIds = isset($values['category_paths']) ? $this->categories->resolve($this->normalizer->normalize($values['category_paths']), $idSource, isset($source['root_category_id']) ? (int) $source['root_category_id'] : null, true, isset($source['default_id_category']) ? (int) $source['default_id_category'] : null) : [];
                 $manufacturer = $this->manufacturers->resolve($values['manufacturer'] ?? null, $idSource, true, isset($source['default_id_manufacturer']) ? (int) $source['default_id_manufacturer'] : null);
                 $idSupplier = isset($source['id_supplier']) && $source['id_supplier'] !== null ? (int) $source['id_supplier'] : null;
@@ -85,6 +91,11 @@ class ImportRunner
                     $this->productLinks->markSeen($idSource, $externalId, $existing, $idRun);
                     ++$counts['unchanged'];
                     continue;
+                }
+                // Only changed items reach this lookup; an unchanged item keeps what it was last written with.
+                [$values, $warning] = ReferenceCheck::apply($values, $existing, fn (string $reference, ?int $except): ?int => $this->catalog->productIdByReference($reference, $except));
+                if ($warning !== null) {
+                    $this->log($log, "item $index field reference: $warning");
                 }
                 $idProduct = $this->products->import($idSource, $externalId, $values, $categoryIds, $manufacturer, $idSupplier, (int) $source['id_lang_default']);
                 // Importers retain their existing signatures; refresh their link with this run ID.
@@ -102,6 +113,12 @@ class ImportRunner
                         foreach ($fields['errors'] as $field => $error) {
                             $this->log($log, "item $index variant $variantIndex field $field: $error");
                         }
+                        if (($warning = Gtin::warning($fields['values']['ean13'] ?? null)) !== null) {
+                            unset($fields['values']['ean13']);
+                            $this->log($log, "item $index variant $variantIndex field ean13: $warning");
+                        } elseif (is_scalar($fields['values']['ean13'] ?? null)) {
+                            $fields['values']['ean13'] = trim((string) $fields['values']['ean13']);
+                        }
                         if ($attributes['errors']) {
                             throw new \RuntimeException('Attribute errors: ' . json_encode($attributes['errors']));
                         }
@@ -116,7 +133,7 @@ class ImportRunner
                             }
                             $ids[] = $this->attributes->resolve((string) $group, $value, true)['id_attribute'];
                         }
-                        $idCombination = $this->combinations->import($idSource, $externalId, (string) $reference, $idProduct, $basePrice, $fields['values'], $ids);
+                        $idCombination = $this->combinations->import($idSource, $externalId, (string) $reference, $idProduct, $basePrice, $fields['values'], $ids, $idSupplier);
                         $this->combinationLinks->link($idSource, $externalId . ':' . $reference, $idCombination, $idProduct, $idRun);
                     } catch (\Throwable $error) {
                         $variantFailed = true;

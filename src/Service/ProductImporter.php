@@ -70,7 +70,10 @@ class ProductImporter
             $product->link_rewrite[$shopLanguage] = $product->link_rewrite[$shopLanguage] ?? $product->link_rewrite[$idLangDefault];
             $product->id_shop_default = (int) \Context::getContext()->shop->id;
         }
-        foreach (['reference', 'ean13'] as $field) {
+        if (isset($mappedValues['mpn']) && !\Validate::isMpn((string) $mappedValues['mpn'])) {
+            throw new \InvalidArgumentException('mpn must be at most 40 characters.');
+        }
+        foreach (['reference', 'ean13', 'mpn'] as $field) {
             if (isset($mappedValues[$field]) && $write($field)) {
                 $product->$field = (string) $mappedValues[$field];
             }
@@ -124,6 +127,10 @@ class ProductImporter
         if ($isNew && $categoryIds === [] && !$product->updateCategories([(int) $product->id_category_default])) {
             throw new \RuntimeException('Unable to associate new product with its default category.');
         }
+        if ($idSupplier !== null) {
+            // The feed identifier becomes the supplier reference of the product itself.
+            (new ProductSupplierLink())->write((int) $product->id, 0, $idSupplier, $externalId);
+        }
         // Stock follows orders, so it always syncs from the feed.
         if (isset($mappedValues['quantity'])) {
             \StockAvailable::setQuantity((int) $product->id, 0, (int) $mappedValues['quantity']);
@@ -161,6 +168,7 @@ class ProductImporter
             'short_description.' . $idLang => ImportedValues::text($product->description_short[$idLang] ?? ''),
             'reference' => (string) $product->reference,
             'ean13' => (string) $product->ean13,
+            'mpn' => (string) $product->mpn,
             'price' => ImportedValues::number($product->price),
             'wholesale_price' => ImportedValues::number($product->wholesale_price),
             'weight' => ImportedValues::number($product->weight),

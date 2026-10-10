@@ -82,6 +82,27 @@ class PreviewBuilderTest extends TestCase
         self::assertCount(1, $this->builder()->table($source, [['name' => 'A'], ['name' => 'B']], 1)['rows']);
     }
 
+    public function testTableFlagsInvalidEanAndReferenceCollisions(): void
+    {
+        $source = $this->withDefaults(['field_mapping' => ['name' => 'fields["name"]', 'reference' => 'fields["ref"]', 'ean13' => 'fields["ean"]']]);
+        $items = [
+            ['name' => 'A', 'ref' => 'R1', 'ean' => '4006381333931'],
+            ['name' => 'B', 'ref' => 'R1', 'ean' => '4006381333932'],
+            ['name' => 'C', 'ref' => 'TAKEN', 'ean' => null],
+            ['name' => 'D', 'ref' => 'R4', 'ean' => ''],
+        ];
+        $table = $this->builder()->table($source, $items, 20, static fn (string $reference, array $item): ?int => $reference === 'TAKEN' ? 5 : null);
+        $cells = array_column($table['rows'], 'cells');
+        self::assertNull($cells[0]['reference']['error']);
+        self::assertNull($cells[0]['ean13']['error']);
+        self::assertSame('"R1" is already used by feed item 0 — not written', $cells[1]['reference']['error']);
+        self::assertSame('invalid EAN-13 "4006381333932" (check digit) — not written', $cells[1]['ean13']['error']);
+        self::assertSame('"TAKEN" is already used by product #5 — not written', $cells[2]['reference']['error']);
+        self::assertNull($cells[2]['ean13']['error']);
+        self::assertNull($cells[3]['reference']['error']);
+        self::assertNull($cells[3]['ean13']['error']);
+    }
+
     public function testTableReturnsVariantImpactAttributeErrorsAndTruncation(): void
     {
         $variants = [['sku' => 'S', 'size' => 'S', 'price' => 205, 'qty' => 2], ['sku' => 'M', 'size' => '', 'price' => 220, 'qty' => 3]];

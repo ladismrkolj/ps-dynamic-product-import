@@ -29,7 +29,9 @@ Every field has one Feed field select, or a formula. Selecting a feed field gene
 | Target | Meaning |
 |---|---|
 | `name` | Required for new products. |
-| `reference`, `ean13` | Plain text. |
+| `reference` | Visible PrestaShop product code. Skipped (not written, logged) when another product already uses it, including an earlier item of the same feed run. Products only; combination references are not checked. The editor's **Use pattern** helper builds `'PREFIX-' ~ fields['id']`. |
+| `ean13` | Exactly 13 digits with a valid GS1 check digit. Anything else (EAN-8, 12-digit UPC, lost leading zeros, scientific notation) is not written and logged as `invalid EAN-13`; empty is not a warning. The preview flags it. |
+| `mpn` | Manufacturer part number (`Product::$mpn`, max 40 characters). Also a combination field. |
 | `price` | Tax-excluded `Product::price`, stored as given. Tax-inclusive prices are not converted. |
 | `regular_price` | If both are mapped and `regular_price` > `price`, the base price becomes `regular_price` and an always-on, all-customer specific price sets `price`. A regular price alone becomes the base price. Otherwise the discount slot is removed. Base products only. A hand-made always-on discount may be overwritten. |
 | `wholesale_price` | Cost price. |
@@ -43,7 +45,7 @@ Every field has one Feed field select, or a formula. Selecting a feed field gene
 | `images` | List of URLs. Null and empty entries are dropped. |
 | `main_image` | Tried first. If absent, the first image is used. It can stand alone. |
 
-The **supplier** is set on the General tab. It tags every product of the source and needs suppliers to exist (Catalog > Brands & Suppliers). Clearing it leaves existing suppliers untouched. Other General settings: root category (default `PS_ROOT_CATEGORY`), source language (`id_lang_default`, default 1) and `deactivate_missing`.
+The **supplier** is set on the General tab. It tags every product of the source and needs suppliers to exist (Catalog > Brands & Suppliers). Each imported product also gets a supplier association with the feed identifier as its supplier reference (see "Identity"). Clearing it leaves existing suppliers untouched. Other General settings: root category (default `PS_ROOT_CATEGORY`), source language (`id_lang_default`, default 1) and `deactivate_missing`.
 
 Existing products keep fields you do not map. New products without categories go to `PS_HOME_CATEGORY`, and the first resolved category becomes the default category. Category and brand names are matched exactly under their parent and filled in every installed language.
 
@@ -51,9 +53,19 @@ Existing products keep fields you do not map. New products without categories go
 
 Images are downloaded over HTTP(S) and created with the PrestaShop `Image` API and the configured product thumbnails. The first successful image becomes the cover only if the product has none. Existing images and covers are kept, and one failed image does not abort the product. Each image's content fingerprint is compared with the product's existing image files, so a known image creates no duplicate. A changed photo at the same URL is added and the old one is not deleted. Two near-identical photos may be treated as one.
 
+## Identity
+
+Five different identifiers are involved. They are easy to confuse:
+
+- **Import identifier** (General tab): an internal per-source link, feed ID → `id_product` through `pi_external_product`. It is not written to the product. The importer never searches the catalogue by reference, EAN or name, so a product created by hand is not matched and will be duplicated by the first import.
+- **Supplier reference**: that feed ID made visible per supplier. When the source has a supplier, the product gets a `product_supplier` row (combination 0) with the feed identifier as `product_supplier_reference`, and every combination its own row with the variant reference. Currency is the shop default; the product's default supplier is the source supplier. It is always written (link information, no manual-edit protection). Without a supplier nothing is created.
+- **PrestaShop reference**: your visible shop code, built from the feed (for example `'PREFIX-' ~ fields['id']`) and kept unique by the import: a reference already used by a different product is not written, the product keeps its current reference (empty if new), and the run log says `item N field reference: "X" is already used by product #M — not written`. Products unchanged since the last run are not re-checked.
+- **EAN-13 and brand + MPN**: global identifiers meant for matching the same product across sources. Matching is not implemented yet; the fields are only stored.
+- **PrestaShop product ID**: PrestaShop's internal row number.
+
 ## Variants
 
-On Product fields > **Variants (optional)**, pick a **Variants list** (a list of objects) or write a list expression. Then map the combination fields `reference`, `ean13`, `price`, `quantity`, `active`, `image` and attribute rows (name plus Feed field or Formula). Variant expressions see `fields` and `variant`. An attribute row and a `reference` field are required when variants are enabled. An empty variants expression disables the section.
+On Product fields > **Variants (optional)**, pick a **Variants list** (a list of objects) or write a list expression. Then map the combination fields `reference`, `ean13`, `mpn`, `price`, `quantity`, `active`, `image` and attribute rows (name plus Feed field or Formula). Variant expressions see `fields` and `variant`. An attribute row and a `reference` field are required when variants are enabled. An empty variants expression disables the section.
 
 - A combination's external key is `<parent id>:<variant reference>`, limited to 191 characters. Avoid colon ambiguity (`a:b` + `c` collides with `a` + `b:c`).
 - `price` is the absolute variant price. The module stores the impact against the product's saved base price (negative values allowed). Both must use the same tax basis. A missing price keeps the existing impact.

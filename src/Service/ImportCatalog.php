@@ -29,6 +29,17 @@ class ImportCatalog
         \StockAvailable::setQuantity($idProduct, $idCombination, 0);
     }
 
+    /** Id of a product other than $exceptProduct that holds this reference, or null. One query. */
+    public function productIdByReference(string $reference, ?int $exceptProduct = null): ?int
+    {
+        $id = \Db::getInstance()->getValue(
+            'SELECT `id_product` FROM `' . _DB_PREFIX_ . "product` WHERE `reference` = '" . pSQL($reference) . "'"
+            . ($exceptProduct === null ? '' : ' AND `id_product` <> ' . (int) $exceptProduct)
+        );
+
+        return $id === false || $id === null ? null : (int) $id;
+    }
+
     private function product(int $id): \Product
     {
         $product = new \Product($id);

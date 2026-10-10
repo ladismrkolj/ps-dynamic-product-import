@@ -22,7 +22,8 @@ class CombinationImporter
         int $idProduct,
         float $baseProductPrice,
         array $mappedFields,
-        array $attributeIds
+        array $attributeIds,
+        ?int $idSupplier = null
     ): int {
         // Identity is parentExternalId:variantExternalId, scoped by id_source.
         $externalId = $parentExternalId . ':' . $variantExternalId;
@@ -47,7 +48,10 @@ class CombinationImporter
         $current = $id === null || $imported === [] ? [] : ImportedValues::fingerprint(self::storeValues($combination));
         $written = [];
         $combination->id_product = $idProduct;
-        foreach (['reference', 'ean13'] as $field) {
+        if (isset($mappedFields['mpn']) && !\Validate::isMpn((string) $mappedFields['mpn'])) {
+            throw new \InvalidArgumentException('mpn must be at most 40 characters.');
+        }
+        foreach (['reference', 'ean13', 'mpn'] as $field) {
             if (isset($mappedFields[$field]) && ImportedValues::writable($imported, $current, $field)) {
                 $combination->$field = (string) $mappedFields[$field];
                 $written[] = $field;
@@ -66,6 +70,10 @@ class CombinationImporter
         $combination->default_on = !$defaultId || $defaultId === (int) $combination->id ? 1 : null;
         if (!$combination->save() || !$combination->setAttributes(array_values(array_unique(array_map('intval', $attributeIds))))) {
             throw new \RuntimeException('Unable to save combination or its attributes.');
+        }
+        if ($idSupplier !== null) {
+            // The variant's feed reference becomes the supplier reference of this combination.
+            (new ProductSupplierLink())->write($idProduct, (int) $combination->id, $idSupplier, $variantExternalId);
         }
         // Combinations have no native active flag: false means zero stock, not hidden.
         if (isset($mappedFields['active']) && !(bool) $mappedFields['active']) {
@@ -97,6 +105,7 @@ class CombinationImporter
         return [
             'reference' => (string) $combination->reference,
             'ean13' => (string) $combination->ean13,
+            'mpn' => (string) $combination->mpn,
             'price' => ImportedValues::number($combination->price),
         ];
     }

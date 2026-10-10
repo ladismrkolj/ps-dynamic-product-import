@@ -275,13 +275,28 @@ class AdminPiSourceController extends ModuleAdminController
                 'default_id_manufacturer' => $saved['default_id_manufacturer'] ?? null,
                 'field_mapping' => $mapping,
                 'variant_mapping' => $variantMapping,
-            ], $feed['items']);
+            ], $feed['items'], \ProductImport\Service\PreviewBuilder::TABLE_LIMIT, $this->referenceOwner((int) $idSource, $saved ?? []));
             $result['item_count'] = count($feed['items']);
             $result['cache'] = $this->cacheInfo($feed);
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }
         $this->sendJson($result);
+    }
+
+    /** Read-only lookup for the preview: the product, other than the item's linked one, holding a reference. */
+    private function referenceOwner(int $idSource, array $saved): callable
+    {
+        $identifier = $_POST['identifier_field'] ?? ($saved['identifier_field'] ?? '');
+        $links = new \ProductImport\Repository\ExternalProductRepository();
+        $catalog = new \ProductImport\Service\ImportCatalog();
+
+        return static function (string $reference, array $item) use ($identifier, $idSource, $links, $catalog): ?int {
+            $externalId = is_string($identifier) && is_scalar($item[$identifier] ?? null) ? (string) $item[$identifier] : null;
+            $linked = $idSource > 0 && $externalId !== null && $externalId !== '' ? $links->findProductId($idSource, $externalId) : null;
+
+            return $catalog->productIdByReference($reference, $linked);
+        };
     }
 
     public function ajaxProcessInspect()
@@ -781,7 +796,7 @@ class AdminPiSourceController extends ModuleAdminController
         ] as $name => $label) {
             if ($name === 'identifier_field') {
                 $inputs[] = ['type' => 'html', 'name' => 'source_test', 'html_content' => $testHtml];
-                $inputs[] = ['type' => 'html', 'name' => 'identifier_control', 'label' => $this->trans('Identifier field'), 'html_content' => '<select id="pi-identifier-picker" aria-label="Identifier field"><option value="">— choose —</option><option value="__other__">Other key…</option></select><input type="text" name="identifier_field" id="identifier_field" value="' . htmlspecialchars((string) $source['identifier_field'], ENT_QUOTES, 'UTF-8') . '" aria-label="Other identifier key" style="display:none"><p class="help-block">Choose a top-level JSON key or enter another key.</p>'];
+                $inputs[] = ['type' => 'html', 'name' => 'identifier_control', 'label' => $this->trans('Identifier field'), 'html_content' => '<select id="pi-identifier-picker" aria-label="Identifier field"><option value="">— choose —</option><option value="__other__">Other key…</option></select><input type="text" name="identifier_field" id="identifier_field" value="' . htmlspecialchars((string) $source['identifier_field'], ENT_QUOTES, 'UTF-8') . '" aria-label="Other identifier key" style="display:none"><p class="help-block">Choose a top-level JSON key or enter another key. Internal link between this source\'s feed items and PrestaShop products. It is not written to the product (it shows only as the supplier reference when the source has a supplier). Use the reference field for a visible product code.</p>'];
             }
             if ($name === 'identifier_field') {
                 continue;
