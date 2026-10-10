@@ -110,7 +110,7 @@ class PreviewBuilder
         foreach (array_slice($items, 0, $limit, true) as $index => $item) {
             if (!is_array($item)) {
                 $rows[] = ['index' => $index, 'included' => null, 'cells' => [], 'notes' => ['item' => 'Item is not an object.'],
-                    'variants' => ['total' => 0, 'errors' => 0]];
+                    'variants' => ['total' => 0, 'truncated' => 0, 'errors' => 0, 'items' => []]];
                 continue;
             }
             $result = $this->build($source, $item);
@@ -119,11 +119,27 @@ class PreviewBuilder
                 $cells[$target] = ['value' => self::display($result['base']['values'][$target] ?? null), 'error' => $result['base']['errors'][$target] ?? null];
             }
             $variantErrors = isset($result['errors']['variants']) ? 1 : 0;
+            $basePrice = $result['base']['values']['price'] ?? null;
+            $basePrice = is_numeric($basePrice) ? (float) $basePrice : null;
+            $variantRows = [];
             foreach ($result['variants']['items'] as $variant) {
                 $variantErrors += count($variant['fields']['errors']) + count($variant['attributes']['errors']);
+                $variantCells = [];
+                foreach (['reference', 'ean13', 'price', 'quantity', 'active', 'image'] as $field) {
+                    $variantCells[$field] = ['value' => self::display($variant['fields']['values'][$field] ?? null), 'error' => $variant['fields']['errors'][$field] ?? null];
+                }
+                $attributes = [];
+                foreach ($variant['attributes']['values'] as $group => $value) {
+                    $attributes[] = ['name' => (string) $group, 'value' => self::display($value), 'error' => $variant['attributes']['errors'][$group] ?? null];
+                }
+                // Mirrors CombinationImporter: impact = variant price - base price.
+                $price = $variant['fields']['values']['price'] ?? null;
+                $impact = $basePrice !== null && is_numeric($price) ? round((float) $price - $basePrice, 6) : null;
+                $variantRows[] = ['index' => $variant['index'], 'attributes' => $attributes, 'cells' => $variantCells, 'price_impact' => $impact];
             }
             $rows[] = ['index' => $index, 'included' => $result['filter']['should_import'] ?? null, 'cells' => $cells,
-                'notes' => $result['errors'], 'variants' => ['total' => $result['variants']['total'], 'errors' => $variantErrors]];
+                'notes' => $result['errors'],
+                'variants' => ['total' => $result['variants']['total'], 'truncated' => $result['variants']['truncated'], 'errors' => $variantErrors, 'items' => $variantRows]];
         }
 
         return ['targets' => $targets, 'rows' => $rows];

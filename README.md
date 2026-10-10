@@ -16,7 +16,7 @@ Package this directory as `productimport/` under PrestaShop's `modules/`, with p
 2. Save. The Product fields tab **loads the feed automatically**. It scans every product and lists each feed field with coverage and samples. It reloads when the URL, path, format or item path changes. **Refresh feed** bypasses the 15-minute cache.
 3. Pick the **Identifier field**, a key that is unique per product within the source, so re-imports update products instead of duplicating them.
 4. For each PrestaShop field, pick the **Feed field** that fills it, or **Formula…** to write an expression.
-5. Check the **Preview** table. It maps the first 20 products with the form's current (even unsaved) mapping, without writing anything, and shows per-cell errors, filter results and variant counts.
+5. Check the **Preview** table. It maps the first 20 products with the form's current (even unsaved) mapping, without writing anything, and shows per-cell errors, filter results and variant counts. Products with variants have a "▸ N variants" button that expands sub-rows (up to 5 variants) with attributes, reference, EAN-13, price and its impact versus the base price, quantity, active and image.
 6. Save, then **Run import now**. Or run one or all sources from the source list, or schedule them (see "Running imports").
 
 Feeds must be a top-level array of items, with no redirect following. Only HTTP(S) URLs are fetched, and local paths must be readable regular files. Real imports always fetch the live feed. Preview, Sample values and discovery use a decoded copy cached for 15 minutes in `<cache dir>/productimport/`.

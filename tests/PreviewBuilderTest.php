@@ -82,6 +82,29 @@ class PreviewBuilderTest extends TestCase
         self::assertCount(1, $this->builder()->table($source, [['name' => 'A'], ['name' => 'B']], 1)['rows']);
     }
 
+    public function testTableReturnsVariantImpactAttributeErrorsAndTruncation(): void
+    {
+        $variants = [['sku' => 'S', 'size' => 'S', 'price' => 205, 'qty' => 2], ['sku' => 'M', 'size' => '', 'price' => 220, 'qty' => 3]];
+        $variants = array_merge($variants, array_fill(0, 5, ['sku' => 'X', 'size' => 'L', 'price' => 200, 'qty' => 1]));
+        $source = $this->withDefaults(['field_mapping' => ['name' => 'path(fields, "name")', 'price' => 'path(fields, "price")'],
+            'variant_mapping' => ['variants_expression' => 'path(fields, "variants")', 'attributes' => [['name' => 'Size', 'expression' => 'path(variant, "size")']],
+                'fields' => ['reference' => 'path(variant, "sku")', 'price' => 'path(variant, "price")', 'quantity' => 'path(variant, "qty")']]]);
+        $row = $this->builder()->table($source, [['name' => 'Suit', 'price' => 200, 'variants' => $variants], ['name' => 'NoBase', 'variants' => $variants]])['rows'];
+        $summary = $row[0]['variants'];
+        self::assertSame(7, $summary['total']);
+        self::assertSame(2, $summary['truncated']);
+        self::assertCount(5, $summary['items']);
+        self::assertSame(5.0, $summary['items'][0]['price_impact']);
+        self::assertSame(20.0, $summary['items'][1]['price_impact']);
+        self::assertSame('205', $summary['items'][0]['cells']['price']['value']);
+        self::assertSame('S', $summary['items'][0]['cells']['reference']['value']);
+        self::assertSame('2', $summary['items'][0]['cells']['quantity']['value']);
+        self::assertSame(['name' => 'Size', 'value' => 'S', 'error' => null], $summary['items'][0]['attributes'][0]);
+        self::assertSame('Attribute value is empty.', $summary['items'][1]['attributes'][0]['error']);
+        self::assertGreaterThan(0, $summary['errors']);
+        self::assertNull($row[1]['variants']['items'][0]['price_impact']);
+    }
+
     public function testAssemblesFieldsAndReadOnlyResolutions(): void
     {
         $result = $this->build(['field_mapping' => ['name' => 'fields["name"]', 'category_paths' => '[" Boards "]', 'manufacturer' => '"Acme"']], ['name' => 'Board']);

@@ -18,6 +18,13 @@
 #pi-configuration-panel .pi-cell-error { background: #f2dede; outline: 1px solid #a94442; }
 #pi-configuration-panel .pi-preview-scroll { overflow-x: auto; max-width: 100%; }
 #pi-configuration-panel .pi-excluded td { color: #777; }
+#pi-configuration-panel .pi-variant-toggle { white-space: nowrap; }
+#pi-configuration-panel tr.pi-variant-row > td { background: #f5f8fa; padding: 0 0 0 28px; border-left: 3px solid #25b9d7; }
+#pi-configuration-panel .pi-variant-table { width: 100%; margin: 0; background: transparent; }
+#pi-configuration-panel .pi-variant-table th { font-weight: 600; color: #555; }
+#pi-configuration-panel .pi-variant-table td, #pi-configuration-panel .pi-variant-table th { background: transparent; }
+#pi-configuration-panel .pi-variant-mark { color: #25b9d7; margin-right: 4px; }
+#pi-configuration-panel .pi-variant-image { display: inline-block; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 </style>
 <script>
 (function () {
@@ -729,6 +736,78 @@
 
     // ---- Preview table ----
     var previewButton = form.querySelector('.pi-preview-table-button');
+    function setCell(cell, entry) {
+      if (entry.error) {
+        cell.className = 'pi-cell-error';
+        cell.title = entry.error;
+        cell.textContent = 'Error: ' + entry.error;
+      } else if (entry.value === null || entry.value === undefined) {
+        cell.className = 'text-muted';
+        cell.textContent = '—';
+      } else cell.textContent = entry.value;
+    }
+
+    function renderVariantRow(row, panelId, span) {
+      var tr = document.createElement('tr');
+      tr.id = panelId;
+      tr.className = 'pi-variant-row';
+      tr.hidden = true;
+      var holder = tr.insertCell();
+      holder.colSpan = span;
+      var table = document.createElement('table');
+      table.className = 'table table-condensed pi-variant-table';
+      var head = table.createTHead().insertRow();
+      ['Attributes', 'Reference', 'EAN-13', 'Price (impact)', 'Quantity', 'Active', 'Image'].forEach(function (title) {
+        var th = document.createElement('th');
+        th.scope = 'col';
+        th.textContent = title;
+        head.appendChild(th);
+      });
+      var tbody = table.createTBody();
+      row.variants.items.forEach(function (variant) {
+        var vr = tbody.insertRow();
+        var attributeCell = vr.insertCell();
+        var mark = document.createElement('span');
+        mark.className = 'pi-variant-mark';
+        mark.textContent = '↳';
+        attributeCell.appendChild(mark);
+        var errors = variant.attributes.filter(function (attribute) { return attribute.error; });
+        attributeCell.appendChild(document.createTextNode(variant.attributes.map(function (attribute) {
+          return attribute.name + ': ' + (attribute.error ? 'Error: ' + attribute.error : (attribute.value === null ? '—' : attribute.value));
+        }).join(', ')));
+        if (errors.length) {
+          attributeCell.className = 'pi-cell-error';
+          attributeCell.title = errors.map(function (attribute) { return attribute.name + ': ' + attribute.error; }).join('; ');
+        }
+        ['reference', 'ean13'].forEach(function (field) { setCell(vr.insertCell(), variant.cells[field]); });
+        var priceCell = vr.insertCell();
+        setCell(priceCell, variant.cells.price);
+        if (!variant.cells.price.error && variant.cells.price.value !== null && variant.price_impact !== null) {
+          var impact = variant.price_impact;
+          priceCell.textContent = variant.cells.price.value + ' (' + (impact >= 0 ? '+' : '−') + Math.abs(impact) + ')';
+        }
+        ['quantity', 'active'].forEach(function (field) { setCell(vr.insertCell(), variant.cells[field]); });
+        var imageCell = vr.insertCell();
+        setCell(imageCell, variant.cells.image);
+        if (!variant.cells.image.error && variant.cells.image.value !== null) {
+          var full = variant.cells.image.value;
+          var text = document.createElement('span');
+          text.className = 'pi-variant-image';
+          text.title = full;
+          text.textContent = full.length > 40 ? '…' + full.slice(-39) : full;
+          imageCell.replaceChildren(text);
+        }
+      });
+      if (row.variants.truncated > 0) {
+        var more = tbody.insertRow().insertCell();
+        more.colSpan = 7;
+        more.className = 'text-muted';
+        more.textContent = 'and ' + row.variants.truncated + ' more ' + (row.variants.truncated === 1 ? 'variant' : 'variants') + ' (not previewed)';
+      }
+      holder.appendChild(table);
+      return tr;
+    }
+
     previewButton.addEventListener('click', function () {
       var output = form.querySelector('.pi-preview-table-results');
       previewButton.disabled = true;
@@ -775,11 +854,36 @@
             } else cell.textContent = entry.value;
           });
           var variantCell = tr.insertCell();
-          variantCell.textContent = row.variants.total + (row.variants.errors ? ' (' + row.variants.errors + ' errors)' : '');
-          if (row.variants.errors) variantCell.className = 'pi-cell-error';
+          var variantRow = null;
+          if (row.variants.total > 0) {
+            var panelId = 'pi-variants-row-' + row.index;
+            var toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'btn btn-default btn-xs pi-variant-toggle';
+            toggle.setAttribute('aria-expanded', 'false');
+            toggle.setAttribute('aria-controls', panelId);
+            var label = row.variants.total + (row.variants.total === 1 ? ' variant' : ' variants');
+            toggle.textContent = '▸ ' + label;
+            variantCell.appendChild(toggle);
+            if (row.variants.errors) {
+              variantCell.className = 'pi-cell-error';
+              variantCell.appendChild(document.createTextNode(' (' + row.variants.errors + ' errors)'));
+            }
+            variantRow = renderVariantRow(row, panelId, data.targets.length + 4);
+            toggle.addEventListener('click', function () {
+              var open = toggle.getAttribute('aria-expanded') !== 'true';
+              toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+              toggle.textContent = (open ? '▾ ' : '▸ ') + label;
+              variantRow.hidden = !open;
+            });
+          } else {
+            variantCell.className = 'text-muted';
+            variantCell.textContent = '—';
+          }
           var noteCell = tr.insertCell();
           noteCell.textContent = Object.keys(row.notes || {}).map(function (key) { return key + ': ' + row.notes[key]; }).join('; ');
           if (noteCell.textContent) noteCell.className = 'pi-cell-error';
+          if (variantRow) body.appendChild(variantRow);
         });
         wrap.appendChild(table);
         output.appendChild(wrap);

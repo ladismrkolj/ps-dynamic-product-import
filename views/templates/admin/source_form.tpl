@@ -39,7 +39,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
   </section>
   <h3 id="pi-reference-heading">Feed fields (reference)</h3>
   <details id="pi-reference-details">
-    <summary id="pi-reference-toggle" class="btn btn-outline-secondary"><i class="material-icons pi-ref-caret" aria-hidden="true">expand_more</i> <span id="pi-reference-toggle-label">Show feed fields</span></summary>
+    <summary id="pi-reference-toggle" class="btn btn-default"><i class="material-icons pi-ref-caret" aria-hidden="true">expand_more</i> <span id="pi-reference-toggle-label">Show feed fields</span></summary>
     <label for="pi-feed-search" class="sr-only">Search feed fields</label>
     <input type="search" id="pi-feed-search" placeholder="Search feed fields" autocomplete="off">
     <table id="pi-reference" class="table table-condensed" aria-labelledby="pi-reference-heading">
