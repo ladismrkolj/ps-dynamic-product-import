@@ -5,3 +5,4 @@
 
 /local-dev/.env
 .DS_Store
+/dist/

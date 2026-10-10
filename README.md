@@ -6,9 +6,20 @@ Related docs: [example feeds and mappings](examples/README.md), [Docker test sto
 
 The module is in active development and keeps no backward compatibility. The module ships no upgrade scripts. After a schema change, uninstall and reinstall. That deletes sources, mappings and product links, so the next import creates new products. Delete the imported products first, or accept duplicates.
 
-## Install
+## Installation
 
-Package this directory as `productimport/` under PrestaShop's `modules/`, with production `vendor/` included, then install it. Screens: Catalog > Product Import and Product Import runs. Sources belong to the installation, not to a shop. Uninstall removes the module tables, the tabs and the cron token. Imported catalog data stays.
+1. Download `productimport-<version>.zip` from the repository's GitHub Releases. To build it yourself, commit your changes and run `./local-dev/dev.sh package` (or `php bin/package.php` with PHP 8.3, Composer, git and the zip extension). The zip lands in `dist/`.
+2. In the back office open Modules > Module Manager > Upload a module and upload the zip, then install.
+
+GitHub's "Download ZIP" does not work: its top-level folder is `ps-dynamic-product-import-<ref>/` instead of `productimport/`, which PrestaShop rejects, and it has no `vendor/` (production Composer dependencies). The release zip has a single `productimport/` folder with `vendor/` included and dev-only files left out.
+
+Screens: Catalog > Product Import and Product Import runs. Sources belong to the installation, not to a shop. Uninstall removes the module tables, the tabs and the cron token. Imported catalog data stays.
+
+### Releasing
+
+1. Bump the version in `config.xml` and in `productimport.php` (`$this->version`). They must match.
+2. Commit, then tag `vX.Y.Z` (the same version) and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+3. The Release workflow checks the tag against `config.xml`, builds the zip and attaches it to the GitHub Release. It can also be started manually from the Actions tab.
 
 ## Quick start
 

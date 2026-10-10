@@ -1,0 +1,13 @@
+# Dev-only paths excluded from `git archive` (and thus the module zip).
+/tests/ export-ignore
+/local-dev/ export-ignore
+/docs/ export-ignore
+/examples/ export-ignore
+/.github/ export-ignore
+/.omp/ export-ignore
+/phpunit.xml.dist export-ignore
+/.php-cs-fixer.dist.php export-ignore
+/AGENTS.md export-ignore
+/.gitignore export-ignore
+/.gitattributes export-ignore
+/bin/package.php export-ignore

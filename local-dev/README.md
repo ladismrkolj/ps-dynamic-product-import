@@ -90,6 +90,17 @@ vendor volume. If installation fails, inspect logs and container health; do
 not erase volumes to hide failures. A Composer platform mismatch is a failure
 to fix, not a reason to disable platform checks.
 
+## Build the module zip
+
+```sh
+./local-dev/dev.sh package            # packages HEAD (PACKAGE_REF=v1.2.3 for another ref)
+```
+
+Writes `dist/productimport-<version>.zip`. The host runs `git archive` (the
+tools image has no git, and `.gitattributes` export-ignore drops dev-only
+paths); the PHP 8.3 composer container then runs `bin/package.php --archive=...`
+to install production vendor/ and zip. Uncommitted changes are not included.
+
 ## Stop or erase
 
 ```sh
