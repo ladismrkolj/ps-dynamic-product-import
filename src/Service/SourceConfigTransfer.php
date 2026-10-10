@@ -96,11 +96,29 @@ class SourceConfigTransfer
             . "# added or updated, others are kept. An entry for a feed value not seen yet is stored and used once the feed\n"
             . "# contains it. If the PrestaShop destination does not exist, the entry is skipped with a warning.\n\n";
         try {
+            $maps = [];
+            foreach (['category_mappings', 'brand_mappings'] as $key) {
+                $maps[$key] = $document[$key] ?? [];
+                unset($document[$key]);
+            }
             $yaml = Yaml::dump($document, 8, 2, Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK);
             // Put the first key of a list item on the dash line ("- name: x"); keep the original if that would change the data.
             $compact = preg_replace('/^( *)-\n\1  (?=\S)/m', '$1- ', $yaml);
             if ($compact !== null && Yaml::parse($compact) === Yaml::parse($yaml)) {
                 $yaml = $compact;
+            }
+
+            foreach ($maps as $key => $entries) {
+                $yaml .= $key . ':' . ($entries === [] ? " {}\n" : "\n");
+                foreach ($entries as $feed => $destination) {
+                    $yaml .= '  ' . self::quote((string) $feed) . ': ' . ($destination === null ? '~' : self::quote((string) $destination)) . "\n";
+                }
+            }
+            $parsed = Yaml::parse($yaml);
+            foreach ($maps as $key => $entries) {
+                if (($parsed[$key] ?? null) !== array_combine(array_map('strval', array_keys($entries)), array_values($entries)) && $entries !== []) {
+                    throw new \RuntimeException('the ' . $key . ' block does not round-trip');
+                }
             }
 
             return $header . $yaml;
@@ -132,7 +150,9 @@ class SourceConfigTransfer
         } catch (ParseException $error) {
             $message = $error->getMessage();
             throw new \InvalidArgumentException('The file is not valid YAML: ' . (str_contains($message, 'Duplicate key')
-                ? 'a key appears twice in the same mapping (each feed category or brand may be listed once). ' : '') . $message);
+                ? 'a key appears twice in the same mapping (each feed category or brand may be listed once). ' : '') . $message
+                . (str_contains($message, 'Non-string keys') || str_contains($message, 'Numeric keys')
+                    ? " Put names that look like numbers, true/false or null in quotes, e.g. '2024': 'Home'." : ''));
         }
         if (!is_array($document) || ($document !== [] && array_is_list($document))) {
             throw new \InvalidArgumentException('The file must contain a YAML mapping with "format", "version" and "source".');
@@ -158,6 +178,7 @@ class SourceConfigTransfer
             $feed = (string) $feed;
             // Feed values are matched like discovery stores them: names trimmed.
             $path = array_map('trim', self::optionalPath($feed, 'category_mappings: feed path "' . $feed . '"') ?? []);
+            self::requireStringDestination($destination, 'category_mappings', $feed);
             $categories[] = ['source_path' => $path, 'category' => self::optionalPath($destination, 'category_mappings: destination of "' . $feed . '"')];
         }
         $brands = [];
@@ -166,6 +187,7 @@ class SourceConfigTransfer
             if ($name === '' || mb_strlen($name) > 191) {
                 throw new \InvalidArgumentException('Every feed brand name in "brand_mappings" must have 1 to 191 characters.');
             }
+            self::requireStringDestination($destination, 'brand_mappings', $name);
             if ($destination !== null && (!is_string($destination) || $destination === '')) {
                 throw new \InvalidArgumentException('brand_mappings: the destination of "' . $name . '" must be a PrestaShop brand name or ~ (auto-create).');
             }
@@ -173,6 +195,28 @@ class SourceConfigTransfer
         }
 
         return ['source' => $source, 'category_mappings' => $categories, 'brand_mappings' => $brands];
+    }
+
+    /** Single-quoted YAML string ('' escapes a quote); double-quoted when it holds control characters. */
+    private static function quote(string $value): string
+    {
+        if (preg_match('/[\x00-\x1f\x7f]/', $value) === 1) {
+            return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        }
+
+        return "'" . str_replace("'", "''", $value) . "'";
+    }
+
+    private static function requireStringDestination($destination, string $block, string $feed): void
+    {
+        if ($destination === null || is_string($destination)) {
+            return;
+        }
+        if (is_int($destination) || is_float($destination) || is_bool($destination)) {
+            $kind = is_bool($destination) ? 'a boolean' : 'the number';
+            $shown = is_bool($destination) ? ($destination ? 'true' : 'false') : (string) $destination;
+            throw new \InvalidArgumentException($block . ': destination of "' . $feed . '" was read as ' . $kind . ' ' . $shown . "; put it in quotes: '" . $shown . "'");
+        }
     }
 
     /** @return array<array-key, mixed> the entries of a "feed value: destination" map */

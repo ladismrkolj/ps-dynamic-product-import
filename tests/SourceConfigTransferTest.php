@@ -80,7 +80,8 @@ class SourceConfigTransferTest extends TestCase
     {
         $json = self::export();
         self::assertStringContainsString('# Product Import source configuration', $json);
-        self::assertMatchesRegularExpression("/^  '?Water > Boards'?: '?Home > Sport > Boards'?$/m", $json);
+        self::assertStringContainsString("\n  'Water > Boards': 'Home > Sport > Boards'\n", $json);
+        self::assertStringContainsString("\n  'Misc': ~\n", $json);
         self::assertStringNotContainsString('token', strtolower($json));
         $decoded = Yaml::parse($json);
         self::assertSame('productimport-source', $decoded['format']);
@@ -497,5 +498,41 @@ class SourceConfigTransferTest extends TestCase
         self::assertSame(['xml', 'products.xml', 'products/product', 'sku', 'fields.a'], [$source['source_format'], $source['location'], $source['xml_item_path'], $source['identifier_field'], $source['filter_expression']]);
         self::assertSame([2, 5, 6, 9, 8, 0, 1], [$source['id_lang_default'], $source['root_category_id'], $source['default_id_category'], $source['default_id_manufacturer'], $source['id_supplier'], $source['active'], $source['deactivate_missing']]);
         self::assertSame('{"name":"fields.n"}', $source['field_mapping']);
+    }
+
+    public function testExportQuotesMappingsAndRoundTrips(): void
+    {
+        $cats = [['source_path' => '["It\'s: a # b","X"]', 'id_category' => '6'], ['source_path' => '["2024"]', 'id_category' => null]];
+        $brands = [['source_name' => 'Kid\'s: Co # 1', 'id_manufacturer' => '9'], ['source_name' => 'true', 'id_manufacturer' => null]];
+        $document = (new SourceConfigTransfer())->build(self::source(), $cats, $brands, self::lookups(), '0.15.0', 'now');
+        $yaml = SourceConfigTransfer::encode($document);
+        self::assertStringContainsString("\n  'It''s: a # b > X': 'Home > Sport > Boards'\n", $yaml);
+        self::assertStringContainsString("\n  '2024': ~\n", $yaml);
+        self::assertStringContainsString("\n  'Kid''s: Co # 1': 'Duotone'\n", $yaml);
+        self::assertStringContainsString("\n  'true': ~\n", $yaml);
+        $parsed = (new SourceConfigTransfer())->parse($yaml);
+        self::assertSame(['It\'s: a # b', 'X'], $parsed['category_mappings'][0]['source_path']);
+        self::assertSame(['2024'], $parsed['category_mappings'][1]['source_path']);
+        self::assertSame('Kid\'s: Co # 1', $parsed['brand_mappings'][0]['source_name']);
+        self::assertSame('true', $parsed['brand_mappings'][1]['source_name']);
+    }
+
+    public function testNumericDestinationAndKeyGiveFriendlyErrors(): void
+    {
+        $transfer = new SourceConfigTransfer();
+        try {
+            $transfer->parse("format: productimport-source\nversion: 1\ncategory_mappings:\n  Kites > Trainer: 123\n", true);
+            self::fail('accepted');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('destination of "Kites > Trainer" was read as the number 123; put it in quotes: \'123\'', $e->getMessage());
+        }
+        try {
+            $transfer->parse("format: productimport-source\nversion: 1\nbrand_mappings:\n  Acme: true\n", true);
+            self::fail('accepted');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('put it in quotes', $e->getMessage());
+        }
+        $parsed = $transfer->parse("format: productimport-source\nversion: 1\nbrand_mappings:\n  2024: Home\n", true);
+        self::assertSame('2024', $parsed['brand_mappings'][0]['source_name']);
     }
 }

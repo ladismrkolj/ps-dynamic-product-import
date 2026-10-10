@@ -193,11 +193,13 @@ The source list has an **Export** row action that downloads `<technical_key>.pro
 source:
   location: https://example.com/feed.json   # URL, or a file path inside the import folder
 category_mappings:
-  Windsurf > Sails: Home > Boards   # feed category path: PrestaShop path
-  Demo Fins: ~                      # ~ or null = auto-create
+  'Windsurf > Sails': 'Home > Boards'   # feed category path: PrestaShop path
+  'Demo Fins': ~                        # ~ or null = auto-create
 brand_mappings:
-  Demo Watersports: Graphic Corner
+  'Demo Watersports': 'Graphic Corner'
 ```
+
+Export writes every mapping key and value as a single-quoted string (a quote is doubled: `'Kid''s'`). Import also accepts unquoted values, but names that YAML would read as a number, `true`/`false` or `null` must be quoted (`'2024': 'Home'`).
 
 Paths are joined with ` > `. A category name that itself contains ` > ` cannot be written; export and import reject it. Each feed value may appear once (a duplicate key is an error). Entries for feed categories or brands the feed has not shown yet are stored as pre-mapped rows ("not seen yet" in the editor) and apply once the feed contains them.
 
