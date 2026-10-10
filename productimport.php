@@ -12,7 +12,7 @@ class ProductImport extends Module
     {
         $this->name = 'productimport';
         $this->tab = 'administration';
-        $this->version = '0.16.0';
+        $this->version = '0.16.1';
         $this->author = 'Product Import';
         $this->need_instance = 0;
         $this->bootstrap = true;
