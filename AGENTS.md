@@ -9,11 +9,12 @@ PrestaShop 9.x module at repo root. Scrapers live elsewhere; JSON/XML feeds are 
 - Production runs PHP 8.3; PHPUnit 13 needs 8.4. Use the isolated Docker setup for PHP-version-sensitive work. Don't install PHP, Composer or database software globally.
 - Follow PrestaShop escaping and database conventions. Validate input. Preserve cron token protection.
 - If you didn't run something, say so. Passing unit tests is not store verification.
-- The module is in active development. Don't keep backward compatibility (old formats, legacy expression forms, deprecated paths, aliases) unless the user asks for it. Remove superseded code rather than supporting both. Data migrations for stores that already have the module installed are a separate question: ask before dropping them.
+- The module is in active development. Don't keep backward compatibility in code (old formats, legacy expression forms, deprecated paths, aliases) unless the user asks for it. Remove superseded code rather than supporting both.
+- The module runs on a live store, so database changes must migrate existing installs. Change the schema only in `SchemaCheck`. Additive changes (new tables or columns) are migrated automatically by `SchemaMigrator`. Renames, type changes, data moves and mapping or setting transformations go in a migration step (`src/Service/Upgrade/`, registered in `Migrations`) with the next version's id. Every release that changes the schema or data ships `upgrade/upgrade-X.Y.Z.php` calling `Upgrader`. Test it by upgrading a store that has the previous version's tables, not by reinstalling.
 
 ## Commits
 
-- Commit after each verified unit of work (tests passing, plus store checks when the change needs them) so the user can push. Don't push.
+- Commit after each verified unit of work (tests passing, plus store checks when the change needs them). Push and release only when the user asks.
 - One logical change per commit, with an imperative subject (`productimport: …`) and a body that says what changed and why.
 - Git has no identity configured here. Use the author from the latest commit through GIT_AUTHOR_* / GIT_COMMITTER_* environment variables; don't change git config.
 - Don't commit .omp/, vendor/, local-dev/.env or test-store data.

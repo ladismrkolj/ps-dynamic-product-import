@@ -11,6 +11,7 @@ class AdminPiSourceController extends ModuleAdminController
     private $submittedSource;
     private $submittedMapping;
     private $submittedVariant;
+    private $migrationReportHtml = '';
 
     public function __construct()
     {
@@ -32,6 +33,11 @@ class AdminPiSourceController extends ModuleAdminController
         }
         if (Tools::isSubmit('submitPiFeedDir')) {
             $this->saveFeedDir();
+
+            return;
+        }
+        if (Tools::isSubmit('submitPiMigrate')) {
+            $this->migrateTables();
 
             return;
         }
@@ -684,7 +690,8 @@ class AdminPiSourceController extends ModuleAdminController
     public function initContent()
     {
         // Render explicitly: there is no source ObjectModel for AdminController to load.
-        $this->content = $this->access('view') ? \ProductImport\Repository\SchemaStatus::alertHtml() : '';
+        $this->content = $this->migrationReportHtml;
+        $this->content .= $this->access('view') ? \ProductImport\Repository\SchemaStatus::alertHtml($this->access('edit') ? self::$currentIndex . '&token=' . $this->token : '') : '';
         if (Tools::isSubmit('addpi_source') || Tools::isSubmit('updatepi_source') || Tools::isSubmit('submitAddpi_source')) {
             if ($this->access((int) Tools::getValue('id_source') > 0 ? 'edit' : 'add')) {
                 $this->content .= $this->renderForm();
@@ -760,6 +767,26 @@ class AdminPiSourceController extends ModuleAdminController
     private function locationHelp(): string
     {
         return Tools::safeOutput($this->trans('https://… to download, or a file path inside %dir% (e.g. products.json)', ['%dir%' => \ProductImport\Service\FeedLocation::feedDir() ?: '(import folder not configured)']));
+    }
+
+    private function migrateTables(): void
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !$this->access('edit') || !$this->checkToken()) {
+            $this->errors[] = $this->trans('You do not have permission or your security token is invalid.');
+
+            return;
+        }
+        $report = \ProductImport\Service\Upgrade\Upgrader::create()->run();
+        \ProductImport\Repository\SchemaStatus::reset();
+        $lines = array_merge($report['statements'], $report['steps']);
+        if ($lines !== []) {
+            $this->migrationReportHtml = '<div class="alert alert-info"><ul><li><code>' . implode('</code></li><li><code>', array_map([Tools::class, 'safeOutput'], $lines)) . '</code></li></ul></div>';
+        }
+        if ($report['ok']) {
+            $this->confirmations[] = $this->trans('The module data is up to date.');
+        } else {
+            $this->errors[] = (string) $report['error'];
+        }
     }
 
     private function saveFeedDir(): void

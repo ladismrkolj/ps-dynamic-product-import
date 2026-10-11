@@ -33,11 +33,9 @@ logs and the storefront responds before installing the module:
 - Login: `ADMIN_MAIL` / `ADMIN_PASSWD` from `.env`.
 - Module screens: Catalog → Product Import / Product Import runs.
 
-`HOST_PORT` in `.env` changes the port if 8080 is in use. The module has no
-upgrade scripts: after schema changes, uninstall and reinstall it. This
-deletes sources, mappings and product links; delete imported DEMO products
-first, or the next import duplicates them. Export sources as YAML beforehand
-to re-import them afterwards.
+`HOST_PORT` in `.env` changes the port if 8080 is in use. After a schema
+change do not reinstall: bump the module version, add
+`upgrade/upgrade-X.Y.Z.php`, and run `docker compose exec --user www-data prestashop php bin/console prestashop:module upgrade productimport`.
 
 ## Unit tests and formatting
 

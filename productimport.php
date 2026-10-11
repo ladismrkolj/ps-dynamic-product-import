@@ -12,7 +12,7 @@ class ProductImport extends Module
     {
         $this->name = 'productimport';
         $this->tab = 'administration';
-        $this->version = '0.16.3';
+        $this->version = '0.17.0';
         $this->author = 'Product Import';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -35,8 +35,11 @@ class ProductImport extends Module
         if (!Configuration::updateValue('PIIMPORT_CRON_TOKEN', bin2hex(random_bytes(20)))) {
             return false;
         }
-        $feedDir = _PS_ROOT_DIR_ . '/var/productimport/feeds';
+        $feedDir = \ProductImport\Service\SchemaMigrator::defaultFeedDir();
         if ((!is_dir($feedDir) && !@mkdir($feedDir, 0775, true) && !is_dir($feedDir)) || !Configuration::updateValue('PIIMPORT_FEED_DIR', $feedDir)) {
+            return false;
+        }
+        if (!\ProductImport\Service\Upgrade\Upgrader::create()->markAllApplied()) {
             return false;
         }
         foreach (['AdminPiSource' => 'Product Import', 'AdminPiRunLog' => 'Product Import runs'] as $class => $title) {
@@ -68,7 +71,7 @@ class ProductImport extends Module
                 return false;
             }
         }
-        if (!Configuration::deleteByName('PIIMPORT_CRON_TOKEN') || !Configuration::deleteByName('PIIMPORT_FEED_DIR')) {
+        if (!Configuration::deleteByName('PIIMPORT_CRON_TOKEN') || !Configuration::deleteByName('PIIMPORT_FEED_DIR') || !Configuration::deleteByName(\ProductImport\Service\Upgrade\DbUpgradeStore::CONFIG_KEY)) {
             return false;
         }
 

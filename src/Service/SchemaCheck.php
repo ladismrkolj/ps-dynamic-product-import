@@ -124,6 +124,17 @@ class SchemaCheck
         return $expected;
     }
 
+    /** @return array<string,array<string,string>> table name without prefix => column => SQL definition, in table order */
+    public static function columnDefinitions(): array
+    {
+        $definitions = [];
+        foreach (self::TABLES as $table => $definition) {
+            $definitions[$table] = $definition['columns'];
+        }
+
+        return $definitions;
+    }
+
     /** @return list<string> table names without prefix, in creation order */
     public static function tables(): array
     {

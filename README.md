@@ -4,7 +4,7 @@ A PrestaShop 9.x module (PHP 8.2+) that imports products from JSON or XML feeds:
 
 Related docs: [example feeds and mappings](examples/README.md), [Docker test store](local-dev/README.md), [store testing](docs/store-testing.md), [contributor rules](AGENTS.md).
 
-The module is in active development and keeps no backward compatibility. The module ships no upgrade scripts. After a schema change, uninstall and reinstall. That deletes sources, mappings and product links, so the next import creates new products. Delete the imported products first, or accept duplicates.
+Upgrading: upload the newer zip in Modules > Module Manager (or run `bin/console prestashop:module upgrade productimport`). Tables and data migrate automatically from any older version; sources, mappings and product links are kept. Back up the database first. Each upgrade runs `ProductImport\Service\Upgrade\Upgrader`: it adds missing tables and columns from `SchemaCheck`, runs the migration steps (`Upgrade\Migrations`) not yet recorded in the `PIIMPORT_MIGRATIONS` setting, in order, then tightens columns to their final definition. A step that changes data (for example moving `json_url`/`json_file_path` into `location`, or rewriting saved mappings) runs once and stops the upgrade with its id and the database error if it fails. A fresh install records every step as applied. Columns are only dropped by a step. If an upgrade did not run, the source list and editor show an "older version" banner with an **Update module data** button that runs the same upgrade. Every release that changes the schema or data ships an `upgrade/upgrade-X.Y.Z.php` that calls `Upgrader::create()->run()`; PrestaShop runs every upgrade file between the installed and the new version.
 
 ## Installation
 
