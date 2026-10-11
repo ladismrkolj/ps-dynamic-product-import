@@ -48,12 +48,17 @@
         state.pane.appendChild(label);
         var defaultSelect = select(data.options, data.default, 'Auto-create (no default)');
         label.appendChild(defaultSelect);
-        function save(control, action, key, indicator, status) {
+        function save(control, action, key, indicator, status, rematch) {
           control.addEventListener('change', function () {
             var value = control.value;
             control.disabled = true; indicator.textContent = 'Saving…';
             post(action, type, key == null ? {value: value} : {key: key, value: value})
-              .then(function (result) { indicator.textContent = 'Saved'; if (status) status.textContent = result.status; if (action === 'saveDefault') load(type); })
+              .then(function (result) {
+                indicator.textContent = 'Saved';
+                if (status) status.textContent = result.status;
+                if (rematch) rematch.hidden = !result.auto;
+                if (action === 'saveDefault') load(type);
+              })
               .catch(function (error) { indicator.textContent = error.message; })
               .then(function () { control.disabled = false; });
           });
@@ -102,7 +107,20 @@
           control.setAttribute('aria-label', 'Destination for ' + row.label);
           cell.appendChild(control);
           var indicator = document.createElement('span'); indicator.setAttribute('aria-live', 'polite'); cell.appendChild(indicator);
-          save(control, 'saveMapping', row.key, indicator, status);
+          var rematch = null;
+          if (type === 'category') {
+            rematch = document.createElement('button'); rematch.type = 'button'; rematch.className = 'btn btn-default btn-sm'; rematch.textContent = 'Re-match by name';
+            rematch.setAttribute('aria-label', 'Re-match by name: ' + row.label);
+            rematch.hidden = !row.auto;
+            rematch.addEventListener('click', function () {
+              if (!window.confirm('Forget the remembered category for "' + row.label + '"? The next import looks the category up by name again (under the source root category, Home by default) and may create a new one there.')) return;
+              rematch.disabled = true;
+              post('rematchCategory', type, {key: row.key})
+                .then(function () { load(type); })
+                .catch(function (error) { indicator.textContent = error.message; rematch.disabled = false; });
+            });
+          }
+          save(control, 'saveMapping', row.key, indicator, status, rematch);
           var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm'; remove.textContent = 'Delete';
           remove.setAttribute('aria-label', 'Delete row ' + row.label);
           remove.addEventListener('click', function () {
@@ -112,7 +130,9 @@
               .then(function () { load(type); })
               .catch(function (error) { indicator.textContent = error.message; remove.disabled = false; });
           });
-          tr.insertCell().appendChild(remove);
+          var actions = tr.insertCell();
+          if (rematch) { actions.appendChild(rematch); actions.appendChild(document.createTextNode(' ')); }
+          actions.appendChild(remove);
         });
         state.pane.appendChild(table);
       }).catch(function (error) { if (token === state.token) state.pane.textContent = error.message; });

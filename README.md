@@ -67,7 +67,7 @@ Every field has one Feed field select, or a formula. Selecting a feed field gene
 
 The new fields above follow the same manual-edit protection as the other fields (see "Keeping manual edits").
 
-The **supplier** is set on the General tab. It tags every product of the source and needs suppliers to exist (Catalog > Brands & Suppliers). Each imported product also gets a supplier association with the feed identifier as its supplier reference (see "Identity"). Clearing it leaves existing suppliers untouched. Other General settings: root category (default `PS_ROOT_CATEGORY`), source language (`id_lang_default`, default 1) and `deactivate_missing`.
+The **supplier** is set on the General tab. It tags every product of the source and needs suppliers to exist (Catalog > Brands & Suppliers). Each imported product also gets a supplier association with the feed identifier as its supplier reference (see "Identity"). Clearing it leaves existing suppliers untouched. Other General settings: root category (default `PS_HOME_CATEGORY`, i.e. Home; the **Use Home** button clears the choice), source language (`id_lang_default`, default 1) and `deactivate_missing`.
 
 Existing products keep fields you do not map. New products without categories go to `PS_HOME_CATEGORY`, and the first resolved category becomes the default category. Category and brand names are matched exactly under their parent and filled in every installed language.
 
@@ -197,7 +197,22 @@ Identifier `product_id`.
 
 ## Categories and brands
 
-The editor's **Categories** and **Brands** tabs list every category path and brand name found. Discovery (**Discover categories from full JSON** and the brand equivalent) scans the whole feed with only that expression, and ignores the filter. It creates nothing and is additive. Each entry can be overridden to an existing PrestaShop category or brand. An empty choice means auto-create. Each tab also has a **Default for anything not mapped below**. The precedence is: explicit override, then source default, then exact-name match or auto-create. A blank brand name or an empty category path gets no default. Overrides and defaults save immediately, independently of the main Save button. Source saves leave them untouched.
+The editor's **Categories** and **Brands** tabs list every category path and brand name found. Discovery (**Discover categories from full JSON** and the brand equivalent) scans the whole feed with only that expression, and ignores the filter. It creates nothing and is additive. Each entry can be overridden to an existing PrestaShop category or brand. An empty choice means auto-create. Each tab also has a **Default for anything not mapped below**. For brands the precedence is: explicit override, then source default, then exact-name match or auto-create (categories: see below). A blank brand name or an empty category path gets no default. Overrides and defaults save immediately, independently of the main Save button. Source saves leave them untouched.
+
+### Categories: matching, moving and renaming
+
+A category is resolved in this order:
+
+1. the explicit override chosen for the feed path;
+2. the source default;
+3. the category remembered for that path (the Categories tab shows it as `auto → Home > Sport > Boards #12`), as long as it still exists;
+4. otherwise the feed path is walked by exact name under the source's root category, missing categories are created, and the resulting category is remembered for that path.
+
+The root category defaults to **Home** (`PS_HOME_CATEGORY`), so new categories appear in the storefront menu. The technical Root category next to Home is used only if you select it. Changing the root does not move existing categories.
+
+Because the import remembers the category it found or created, you can **move or rename** it in Catalog > Categories and the next import keeps using it, with no duplicate. Categories found by name are remembered too, so existing installs adopt their current categories on the next run. If a remembered category is deleted, the next import walks the name path again, creating a new one if needed, and remembers that. The preview uses a remembered category when there is one and never writes.
+
+**Re-match by name** (row action on the Categories tab, shown for remembered rows) forgets the remembered category. The next import looks the path up by name again and may create a new category under the root. Use it when the feed path should map to a different, name-matching category. Remembered categories are store-specific and are not part of the YAML export or import.
 
 ## Keeping manual edits
 

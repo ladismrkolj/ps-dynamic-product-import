@@ -19,7 +19,7 @@ class CategoryResolver
 
     /**
      * @param list<list<string>> $normalizedPaths
-     * @return array Commit: list<int>; preview: list<{path, id_category, auto_create}>.
+     * @return array Commit: list<int>; preview: list<{path, id_category, auto_create, remembered}>.
      */
     public function resolve(array $normalizedPaths, int $idSource, ?int $rootCategoryId, bool $commit = true, ?int $defaultId = null): array
     {
@@ -38,15 +38,22 @@ class CategoryResolver
                 $this->mappings->upsertSeen($idSource, $hash, json_encode($path));
             }
             $override = $this->mappings->findOverride($idSource, $hash);
-            if ($override !== null && $override['id_category'] !== null) {
-                $resolved[] = $this->cache[$key] = $commit ? (int) $override['id_category'] : ['path' => $path, 'id_category' => (int) $override['id_category'], 'auto_create' => false];
+            $overrideId = $override !== null && $override['id_category'] !== null ? (int) $override['id_category'] : null;
+            $remembered = $override !== null && ($override['id_category_auto'] ?? null) !== null ? (int) $override['id_category_auto'] : null;
+            $decision = CategoryResolution::decide($overrideId, $defaultId, $remembered, $remembered !== null && \Validate::isLoadedObject(new \Category($remembered)));
+            if ($decision === CategoryResolution::OVERRIDE) {
+                $resolved[] = $this->cache[$key] = $commit ? $overrideId : ['path' => $path, 'id_category' => $overrideId, 'auto_create' => false, 'remembered' => false];
                 continue;
             }
-            if ($defaultId !== null) {
-                $resolved[] = $this->cache[$key] = $commit ? $defaultId : ['path' => $path, 'id_category' => $defaultId, 'auto_create' => false];
+            if ($decision === CategoryResolution::DEFAULT) {
+                $resolved[] = $this->cache[$key] = $commit ? $defaultId : ['path' => $path, 'id_category' => $defaultId, 'auto_create' => false, 'remembered' => false];
                 continue;
             }
-            $parent = $rootCategoryId ?? (int) \Configuration::get('PS_ROOT_CATEGORY');
+            if ($decision === CategoryResolution::REMEMBERED) {
+                $resolved[] = $this->cache[$key] = $commit ? $remembered : ['path' => $path, 'id_category' => $remembered, 'auto_create' => false, 'remembered' => true];
+                continue;
+            }
+            $parent = $rootCategoryId ?? (int) \Configuration::get('PS_HOME_CATEGORY');
             if ($parent <= 0 || !\Validate::isLoadedObject(new \Category($parent))) {
                 throw new \RuntimeException('Category root does not exist.');
             }
@@ -56,7 +63,10 @@ class CategoryResolver
                     break;
                 }
             }
-            $entry = $commit ? $parent : ['path' => $path, 'id_category' => $parent, 'auto_create' => $parent === null];
+            if ($commit) {
+                $this->mappings->setAuto($idSource, $hash, $parent);
+            }
+            $entry = $commit ? $parent : ['path' => $path, 'id_category' => $parent, 'auto_create' => $parent === null, 'remembered' => false];
             // A preview miss (category not yet created) can go stale once a commit creates it.
             if ($commit || $parent !== null) {
                 $this->cache[$key] = $entry;

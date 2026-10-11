@@ -134,6 +134,11 @@ class ProductImporter
         }
         $categoryIds = array_values(array_unique(array_map('intval', $categoryIds)));
         $writeCategories = $categoryIds !== [] && $write('categories');
+        if ($categoryIds !== [] && !$writeCategories && !$isNew && $this->categoriesOrphaned($product)) {
+            // A deleted category is not a manual edit: write the resolved categories so the product is not lost from the tree.
+            $writeCategories = true;
+            $written[] = 'categories';
+        }
         if ($writeCategories) {
             $product->id_category_default = $categoryIds[0];
         } elseif ($isNew) {
@@ -249,6 +254,23 @@ class ProductImporter
         }
 
         return NativeFields::listFingerprint(array_column($rows, 'id_carrier_reference'));
+    }
+
+    /** Pure rule: categories are orphaned when the default category no longer exists or the product has no category associations. */
+    public static function categoriesAreOrphaned(bool $defaultCategoryExists, int $associationCount): bool
+    {
+        return !$defaultCategoryExists || $associationCount === 0;
+    }
+
+    private function categoriesOrphaned(\Product $product): bool
+    {
+        $count = \Db::getInstance()->getValue('SELECT COUNT(*) FROM `' . _DB_PREFIX_ . 'category_product` WHERE `id_product` = ' . (int) $product->id);
+        if ($count === false) {
+            throw new \RuntimeException('Unable to read product categories.');
+        }
+        $default = (int) $product->id_category_default;
+
+        return self::categoriesAreOrphaned($default > 0 && \Validate::isLoadedObject(new \Category($default)), (int) $count);
     }
 
     /** Store values the import can write, normalized to strings for comparison. */

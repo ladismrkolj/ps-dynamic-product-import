@@ -24,7 +24,7 @@ class AdminPiSourceController extends ModuleAdminController
 
     public function postProcess()
     {
-        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'addMapping' => 'ajaxProcessAddMapping', 'deleteMapping' => 'ajaxProcessDeleteMapping', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
+        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'addMapping' => 'ajaxProcessAddMapping', 'deleteMapping' => 'ajaxProcessDeleteMapping', 'rematchCategory' => 'ajaxProcessRematchCategory', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
         $action = Tools::getValue('action');
         if ($this->ajax && is_string($action) && isset($actions[$action])) {
             $this->{$actions[$action]}();
@@ -483,12 +483,28 @@ class AdminPiSourceController extends ModuleAdminController
         return [$source, $category, $options, $names, $idColumn];
     }
 
-    private function mappingStatus(?int $id, $default, array $names, bool $category): string
+    private function mappingStatus(?int $id, $default, array $names, bool $category, ?int $auto = null): string
     {
         if ($id === null) {
-            return $default === null ? 'auto-create' : 'source default #' . $default;
+            if ($default !== null) {
+                return 'source default #' . $default;
+            }
+            return $auto === null ? 'auto-create' : $this->autoStatus($auto);
         }
         return 'existing ' . ($category ? 'category' : 'manufacturer') . ' #' . $id . ' (' . ($names[$id] ?? 'missing or unavailable') . ')';
+    }
+
+    /** 'auto → Home > Sport > Boards #12' for a remembered auto-created category. */
+    private function autoStatus(int $auto): string
+    {
+        $path = (new \ProductImport\Repository\CategoryMappingRepository())->findNamePath(
+            $auto,
+            (int) Configuration::get('PS_ROOT_CATEGORY'),
+            (int) $this->context->shop->id,
+            (int) $this->context->language->id
+        );
+
+        return 'auto → ' . ($path === null ? 'missing category' : implode(' > ', $path)) . ' #' . $auto;
     }
 
     public function ajaxProcessMappings()
@@ -500,9 +516,10 @@ class AdminPiSourceController extends ModuleAdminController
             $rows = [];
             foreach ($repository->findAllForSource((int) $source['id_source']) as $row) {
                 $id = $row[$idColumn] === null ? null : (int) $row[$idColumn];
+                $auto = $category && $row['id_category_auto'] !== null ? (int) $row['id_category_auto'] : null;
                 $rows[] = ['key' => $category ? $row['source_path_hash'] : $row['source_name'],
                     'label' => $category ? implode(' > ', json_decode($row['source_path'], true, 512, JSON_THROW_ON_ERROR)) : $row['source_name'],
-                    'id' => $id, 'seen' => $row['date_seen'] ?: null, 'status' => $this->mappingStatus($id, $default, $names, $category)];
+                    'id' => $id, 'auto' => $auto !== null, 'seen' => $row['date_seen'] ?: null, 'status' => $this->mappingStatus($id, $default, $names, $category, $auto)];
             }
             $this->sendJson(['default' => $default === null ? null : (int) $default, 'rows' => $rows,
                 'options' => array_map(static function ($option) use ($idColumn) {
@@ -531,7 +548,12 @@ class AdminPiSourceController extends ModuleAdminController
                 }
                 $repository->setOverride($idSource, $key, $id);
             }
-            $this->sendJson(['ok' => true, 'status' => $this->mappingStatus($id, $default ? null : $source['default_' . $idColumn], $names, $category)]);
+            $auto = null;
+            if (!$default && $category) {
+                $saved = $repository->findOverride($idSource, $key);
+                $auto = $saved !== null && $saved['id_category_auto'] !== null ? (int) $saved['id_category_auto'] : null;
+            }
+            $this->sendJson(['ok' => true, 'status' => $this->mappingStatus($id, $default ? null : $source['default_' . $idColumn], $names, $category, $auto), 'auto' => $auto !== null]);
         } catch (Throwable $error) {
             $this->sendJson(['error' => $error->getMessage()]);
         }
@@ -604,6 +626,27 @@ class AdminPiSourceController extends ModuleAdminController
                 throw new InvalidArgumentException($category ? 'Unknown source path.' : 'Unknown source brand.');
             }
             $repository->delete($idSource, $key);
+            $this->sendJson(['ok' => true]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+    }
+
+    /** Forgets the remembered auto category of one row of this source, so the next import looks the name path up again. */
+    public function ajaxProcessRematchCategory()
+    {
+        try {
+            [$source, $category] = $this->mappingContext('edit');
+            if (!$category) {
+                throw new InvalidArgumentException('Only category rows can be re-matched.');
+            }
+            $idSource = (int) $source['id_source'];
+            $key = Tools::getValue('key');
+            $repository = new \ProductImport\Repository\CategoryMappingRepository();
+            if (!is_string($key) || !$repository->findOverride($idSource, $key)) {
+                throw new InvalidArgumentException('Unknown source path.');
+            }
+            $repository->clearAuto($idSource, $key);
             $this->sendJson(['ok' => true]);
         } catch (Throwable $error) {
             $this->sendJson(['error' => $error->getMessage()]);
@@ -843,8 +886,8 @@ class AdminPiSourceController extends ModuleAdminController
         $tree->setSelectedCategories($source['root_category_id'] ? [(int) $source['root_category_id']] : []);
         $inputs[] = [
             'type' => 'html', 'name' => 'root_category_tree', 'label' => $this->trans('Root category'),
-            'html_content' => $tree->render() . '<button type="button" class="btn btn-default" onclick="document.querySelectorAll(&quot;[name=root_category_id]&quot;).forEach(function (input) { input.checked = false; });">Use shop root</button>',
-            'desc' => $this->trans('Auto-created categories are placed under this category.'),
+            'html_content' => $tree->render() . '<button type="button" class="btn btn-default" onclick="document.querySelectorAll(&quot;[name=root_category_id]&quot;).forEach(function (input) { input.checked = false; });">Use Home</button>',
+            'desc' => $this->trans('Auto-created categories are placed under this category. With none selected they go under Home.'),
         ];
         $inputs[] = [
             'type' => 'select', 'name' => 'id_lang_default', 'label' => $this->trans('Source language'),
