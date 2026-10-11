@@ -16,7 +16,8 @@ class ImportRunnerTest extends TestCase
         $state = $sharedState ?? (object) ['products' => ['old' => ['external_id' => 'old', 'id_product' => 10, 'id_run_last_seen' => null], 'stale' => ['external_id' => 'stale', 'id_product' => 11, 'id_run_last_seen' => 1]],
             'combinations' => ['old:stale' => ['id_product' => 10, 'id_product_attribute' => 50, 'id_run_last_seen' => null]],
             'triggers' => [], 'deactivated' => [], 'zeroed' => [], 'finished' => [], 'prices' => [], 'staleCalls' => 0, 'emptyStreakUpdates' => [],
-            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => [], 'related' => [], 'featureCalls' => [], 'relatedFails' => []];
+            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => [], 'related' => [], 'featureCalls' => [], 'relatedFails' => [],
+            'tombstoneCalls' => [], 'otherLinks' => [], 'deletedProducts' => [], 'forgotten' => []];
         $fetcher = static function (array $source) use ($items, $fetchFails): array {
             if ($fetchFails) {
                 throw new \RuntimeException('fetch failed');
@@ -33,7 +34,7 @@ class ImportRunnerTest extends TestCase
             }
             public function link(int $source, string $external, int $product, ?int $run = null, ?array $importedValues = null): void
             {
-                $this->state->products[$external] = ['external_id' => $external, 'id_product' => $product, 'id_run_last_seen' => $run] + ($this->state->products[$external] ?? []);
+                $this->state->products[$external] = ['external_id' => $external, 'id_product' => $product, 'id_run_last_seen' => $run, 'date_missing' => null] + ($this->state->products[$external] ?? []);
             }
             public function findFeedHash(int $source, string $external): ?string
             {
@@ -52,6 +53,7 @@ class ImportRunnerTest extends TestCase
             public function markSeen(int $source, string $external, int $product, int $run): void
             {
                 $this->state->products[$external]['id_run_last_seen'] = $run;
+                $this->state->products[$external]['date_missing'] = null;
                 foreach ($this->state->combinations as $key => $row) {
                     if ($row['id_product'] === $product) {
                         $this->state->combinations[$key]['id_run_last_seen'] = $run;
@@ -65,7 +67,37 @@ class ImportRunnerTest extends TestCase
             public function findStaleForSource(int $source, int $run): array
             {
                 ++$this->state->staleCalls;
-                return array_values(array_filter($this->state->products, static fn ($row) => $row['id_run_last_seen'] !== $run));
+                return array_values(array_filter($this->state->products, static fn ($row) => $row['id_run_last_seen'] !== $run && !isset($row['date_deleted'])));
+            }
+            public function findTombstonedExternalIds(int $source): array
+            {
+                return array_keys(array_filter($this->state->products, static fn ($row) => isset($row['date_deleted'])));
+            }
+            public function tombstoneProduct(int $product, ?string $name = null): int
+            {
+                $this->state->tombstoneCalls[] = $product;
+                foreach ($this->state->products as $external => $row) {
+                    if ($row['id_product'] === $product) {
+                        $this->state->products[$external]['date_deleted'] = '2026-01-01 00:00:00';
+                    }
+                }
+                return 1;
+            }
+            public function markMissing(int $source, string $external, string $date): void
+            {
+                $this->state->products[$external]['date_missing'] ??= $date;
+            }
+            public function hasLinkFromOtherSource(int $product, int $source, string $external): bool
+            {
+                return in_array($product, $this->state->otherLinks, true);
+            }
+            public function unlink(int $source, string $external): void
+            {
+                unset($this->state->products[$external]);
+            }
+            public function forgetProductDetails(int $product): void
+            {
+                $this->state->forgotten[] = $product;
             }
         };
         $combinationLinks = new class ($state) extends ExternalCombinationRepository {
@@ -116,6 +148,11 @@ class ImportRunnerTest extends TestCase
             {
                 $this->state->imports[] = $external;
                 $this->state->importValues[$external] = $values;
+                if ($external === 'gone') {
+                    // Like the real importer: the linked product no longer exists, so its link became a tombstone.
+                    $this->state->tombstoneCalls[] = 99;
+                    throw new \ProductImport\Service\ProductDeletedException('Linked product no longer exists: 99');
+                }
                 if ($external === 'broken') {
                     throw new \RuntimeException('save failed');
                 }
@@ -207,6 +244,17 @@ class ImportRunnerTest extends TestCase
             {
                 $this->state->zeroed[] = [$idProduct, $idCombination];
             }
+            public function isProductActive(int $idProduct): bool
+            {
+                return $this->state->activeInStore[$idProduct] ?? true;
+            }
+            public function deleteProduct(int $idProduct): void
+            {
+                if ($this->state->deleteFails ?? false) {
+                    throw new \RuntimeException('delete failed');
+                }
+                $this->state->deletedProducts[] = $idProduct;
+            }
         };
         $features = new class ($state) extends FeatureResolver {
             public function __construct(private object $state)
@@ -245,7 +293,7 @@ class ImportRunnerTest extends TestCase
     {
         [$runner, $state] = $this->fixture([['id' => 'old'], ['id' => 'new'], ['id' => 'skip', 'skip' => true], [], ['id' => 'broken']]);
         $result = $runner->runOne($this->source(['deactivate_missing' => true]), 'admin-manual');
-        self::assertSame(['created' => 1, 'updated' => 1, 'unchanged' => 0, 'skipped' => 1, 'failed' => 2], $result['counts']);
+        self::assertSame(['created' => 1, 'updated' => 1, 'unchanged' => 0, 'skipped' => 1, 'failed' => 2, 'deleted' => 0], $result['counts']);
         self::assertSame('completed_with_errors', $result['status']);
         self::assertStringContainsString('item 3: missing identifier_field value', $result['error_log']);
         self::assertStringContainsString('item 4: save failed', $result['error_log']);
@@ -272,7 +320,7 @@ class ImportRunnerTest extends TestCase
         [$runner, $state] = $this->fixture([]);
         $result = $runner->runOne($this->source(['deactivate_missing' => true]), 'admin-manual');
         self::assertSame('failed', $result['status']);
-        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0], $result['counts']);
+        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0], $result['counts']);
         self::assertSame([], $state->deactivated);
         self::assertSame([], $state->zeroed);
         self::assertSame(0, $state->staleCalls);
@@ -345,7 +393,7 @@ class ImportRunnerTest extends TestCase
     {
         [$runner, $state] = $this->fixture([['id' => 'old', 'variants' => null], ['id' => 'new']]);
         $result = $runner->runOne($this->source(['variant_mapping' => ['variants_expression' => 'path(fields, "variants")', 'attributes' => [], 'fields' => []]]), 'admin-manual');
-        self::assertSame(['created' => 1, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0], $result['counts']);
+        self::assertSame(['created' => 1, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0], $result['counts']);
         self::assertSame('completed', $result['status']);
         self::assertSame('', $result['error_log']);
         self::assertSame([], $state->prices);
@@ -403,7 +451,7 @@ class ImportRunnerTest extends TestCase
         $state->combinations['old:good']['id_run_last_seen'] = null;
 
         $second = $runner->runOne($source, 'admin-manual');
-        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 1, 'skipped' => 0, 'failed' => 0], $second['counts']);
+        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 1, 'skipped' => 0, 'failed' => 0, 'deleted' => 0], $second['counts']);
         self::assertSame(['old'], $state->imports, 'no importer call on the unchanged run');
         self::assertSame([123.5], $state->prices);
         self::assertSame(20, $state->products['old']['id_run_last_seen']);
@@ -445,14 +493,191 @@ class ImportRunnerTest extends TestCase
         self::assertNull($state->products['stale']['feed_hash']);
     }
 
-    public function testMissingProductReimportsDespiteMatchingHash(): void
+    public function testLinkedProductDeletedWithoutTombstoneBecomesTombstoneAndIsSkipped(): void
     {
         [$runner, $state] = $this->fixture([['id' => 'old']]);
         $runner->runOne($this->source(), 'admin-manual');
         $state->missing[] = 10;
         $result = $runner->runOne($this->source(), 'admin-manual');
-        self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0], $result['counts']);
-        self::assertSame(['old', 'old'], $state->imports);
+        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 1, 'failed' => 0, 'deleted' => 0], $result['counts']);
+        self::assertSame([10], $state->tombstoneCalls);
+        self::assertSame(['old'], $state->imports, 'no importer call for the tombstoned item');
+        self::assertSame('completed', $result['status']);
+        $again = $runner->runOne($this->source(), 'admin-manual');
+        self::assertSame(1, $again['counts']['skipped']);
+        self::assertSame(['old'], $state->imports);
+    }
+
+    public function testTombstonedItemsAreSkippedAndSummarisedOnce(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old'], ['id' => 'stale'], ['id' => 'new']]);
+        $state->products['old']['date_deleted'] = '2026-01-01 00:00:00';
+        $state->products['stale']['date_deleted'] = '2026-01-01 00:00:00';
+        $result = $runner->runOne($this->source(['deactivate_missing' => true]), 'admin-manual');
+        self::assertSame(['created' => 1, 'updated' => 0, 'unchanged' => 0, 'skipped' => 2, 'failed' => 0, 'deleted' => 0], $result['counts']);
+        self::assertSame(['new'], $state->imports);
+        self::assertSame([], $state->deactivated, 'tombstones are ignored by stale cleanup');
+        self::assertSame(1, substr_count($result['error_log'], 'skipped: their product was deleted'));
+        self::assertStringContainsString('2 item(s) skipped', $result['error_log']);
+        self::assertSame('completed', $result['status']);
+    }
+
+    public function testStaleLinkWhoseProductIsGoneBecomesTombstoneInsteadOfFailing(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old']]);
+        $state->missing[] = 11;
+        $result = $runner->runOne($this->source(['deactivate_missing' => true]), 'admin-manual');
+        self::assertSame([11], $state->tombstoneCalls);
+        self::assertSame([], $state->deactivated);
+        self::assertSame(0, $result['counts']['failed']);
+    }
+
+    public function testFirstMissStartsTheClockAndKeepsItAfterwards(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old']]);
+        $runner->runOne($this->source(['deactivate_missing' => true]), 'admin-manual');
+        $first = $state->products['stale']['date_missing'];
+        self::assertNotNull($first);
+        self::assertSame([11], $state->deactivated);
+        self::assertSame([], $state->deletedProducts, 'a fresh miss is never deleted');
+        $state->products['stale']['date_missing'] = '2020-01-01 00:00:00';
+        $runner->runOne($this->source(['deactivate_missing' => true]), 'admin-manual');
+        self::assertSame('2020-01-01 00:00:00', $state->products['stale']['date_missing']);
+    }
+
+    private function expiredStale(object $state, int $daysAgo = 31): void
+    {
+        $state->products['stale']['date_missing'] = date('Y-m-d H:i:s', time() - $daysAgo * 86400);
+        $state->activeInStore[11] = false;
+    }
+
+    public function testExpiredInactiveProductIsDeletedWithItsLinks(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old']]);
+        $this->expiredStale($state);
+        $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame([11], $state->deletedProducts);
+        self::assertSame([11], $state->forgotten);
+        self::assertArrayNotHasKey('stale', $state->products);
+        self::assertSame(1, $result['counts']['deleted']);
+        self::assertSame(0, $result['counts']['failed']);
+        self::assertSame([], $state->deactivated);
+        self::assertStringContainsString('Deleted product 11 (external id stale)', $result['error_log']);
+        self::assertSame($result['counts'], $state->finished[0]['counts']);
+    }
+
+    public function testProductIsNotDeletedWhenStillActiveLinkedElsewhereRecentOrDisabled(): void
+    {
+        foreach (['active', 'other source', 'recent', 'never', 'zero'] as $case) {
+            [$runner, $state] = $this->fixture([['id' => 'old']]);
+            $this->expiredStale($state, $case === 'recent' ? 29 : 31);
+            $state->activeInStore[11] = $case !== 'active' ? false : true;
+            $state->otherLinks = $case === 'other source' ? [11] : [];
+            $days = match ($case) {
+                'never' => null,
+                'zero' => 0,
+                default => 30,
+            };
+            $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => $days]), 'admin-manual');
+            self::assertSame([], $state->deletedProducts, $case);
+            self::assertSame(0, $result['counts']['deleted'], $case);
+            self::assertArrayHasKey('stale', $state->products, $case);
+        }
+    }
+
+    public function testNothingIsDeletedWhenDeactivateMissingIsOff(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old']]);
+        $this->expiredStale($state);
+        $runner->runOne($this->source(['deactivate_missing' => false, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame([], $state->deletedProducts);
+        self::assertSame(0, $state->staleCalls);
+    }
+
+    public function testEmptyFeedGuardAlsoGuardsDeletion(): void
+    {
+        [$runner, $state] = $this->fixture([]);
+        $this->expiredStale($state);
+        $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame([], $state->deletedProducts);
+        self::assertSame(0, $state->staleCalls);
+    }
+
+    public function testPresentItemThatIsSkippedForItsTombstoneIsNeitherTimedNorDeleted(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'gone']]);
+        $expired = date('Y-m-d H:i:s', time() - 400 * 86400);
+        $state->products['gone'] = ['external_id' => 'gone', 'id_product' => 99, 'id_run_last_seen' => 1, 'date_missing' => $expired];
+        $state->activeInStore[99] = false;
+        $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 1, 'failed' => 0, 'deleted' => 0], $result['counts']);
+        self::assertSame('completed', $result['status']);
+        self::assertSame([99], $state->tombstoneCalls);
+        self::assertSame([], $state->deletedProducts);
+        self::assertSame($expired, $state->products['gone']['date_missing']);
+    }
+
+    public function testPresentFailingItemKeepsItsProductAndStartsNoClock(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old'], ['id' => 'broken']]);
+        $state->products['broken'] = ['external_id' => 'broken', 'id_product' => 14, 'id_run_last_seen' => 1, 'date_missing' => null];
+        $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame(1, $result['counts']['failed']);
+        self::assertNull($state->products['broken']['date_missing'], 'a failing item is present in the feed, not missing');
+        self::assertArrayHasKey('broken', $state->products);
+        self::assertSame([], $state->deletedProducts);
+        self::assertContains(14, $state->deactivated, 'it is still hidden as today');
+    }
+
+    public function testRunWithFailuresNeverDeletesAnything(): void
+    {
+        $feeds = ['failing item' => [['id' => 'old'], ['id' => 'broken']], 'item without identifier' => [['id' => 'old'], []]];
+        foreach ($feeds as $case => $feed) {
+            [$runner, $state] = $this->fixture($feed);
+            $this->expiredStale($state);
+            $expired = $state->products['stale']['date_missing'];
+            $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+            self::assertSame([], $state->deletedProducts, $case);
+            self::assertSame(0, $result['counts']['deleted'], $case);
+            self::assertArrayHasKey('stale', $state->products, $case);
+            self::assertSame($expired, $state->products['stale']['date_missing'], $case);
+            self::assertSame(1, substr_count($result['error_log'], 'Auto-delete skipped'), $case);
+            self::assertContains(11, $state->deactivated, $case);
+        }
+    }
+
+    public function testFilteredOutItemWithExpiredDateIsDeleted(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old'], ['id' => 'stale', 'skip' => true]]);
+        $this->expiredStale($state);
+        $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 1, 'failed' => 0, 'deleted' => 1], $result['counts']);
+        self::assertSame([11], $state->deletedProducts);
+    }
+
+    public function testReturningItemClearsDateMissing(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old'], ['id' => 'stale']]);
+        $state->products['stale']['date_missing'] = '2026-01-01 00:00:00';
+        $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame(0, $result['counts']['failed']);
+        self::assertNull($state->products['stale']['date_missing']);
+        self::assertSame([], $state->deletedProducts);
+
+        $state->products['old']['date_missing'] = '2026-01-01 00:00:00';
+        $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertNull($state->products['old']['date_missing'], 'an unchanged item is marked seen and clears it too');
+    }
+
+    public function testFailedProductDeleteKeepsTheLinkSoItIsNotTombstonedLater(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'old']]);
+        $this->expiredStale($state);
+        $state->deleteFails = true;
+        $result = $runner->runOne($this->source(['deactivate_missing' => true, 'delete_missing_days' => 30]), 'admin-manual');
+        self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 1, 'deleted' => 0], $result['counts']);
+        self::assertSame(11, $state->products['stale']['id_product']);
+        self::assertSame([], $state->tombstoneCalls);
     }
 
     public function testFeedHashIgnoresKeyOrderButNotValues(): void
@@ -580,10 +805,10 @@ class ImportRunnerTest extends TestCase
     {
         [$runner, $state] = $this->fixture([['id' => 'orphan']]);
         $first = $runner->runOne($this->source(), 'admin-manual');
-        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 1], $first['counts']);
+        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 1, 'deleted' => 0], $first['counts']);
         self::assertSame(13, $state->products['orphan']['id_product']);
         self::assertNull($state->products['orphan']['feed_hash'] ?? null);
         $second = $runner->runOne($this->source(), 'admin-manual');
-        self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0], $second['counts']);
+        self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0], $second['counts']);
     }
 }

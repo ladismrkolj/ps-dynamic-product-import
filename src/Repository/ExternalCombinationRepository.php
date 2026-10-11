@@ -37,6 +37,14 @@ class ExternalCombinationRepository
         }
     }
 
+    /** A combination deleted by hand: forget its link (no tombstone), so the next run recreates it if the feed still has it. */
+    public function unlinkCombination(int $idProductAttribute): void
+    {
+        if (!\Db::getInstance()->execute('DELETE FROM `' . _DB_PREFIX_ . 'pi_external_combination` WHERE `id_product_attribute` = ' . (int) $idProductAttribute)) {
+            throw new \RuntimeException(DbError::message('Unable to unlink external combination'));
+        }
+    }
+
     public function findStaleForSource(int $idSource, int $currentRunId): array
     {
         $rows = \Db::getInstance()->executeS('SELECT * FROM `' . _DB_PREFIX_ . 'pi_external_combination` WHERE `id_source` = ' . (int) $idSource

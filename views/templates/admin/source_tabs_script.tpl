@@ -18,7 +18,7 @@
     var config = document.getElementById('pi-configuration-panel');
     // Move existing nodes, never clone them: values, IDs, names and listeners survive.
     product.appendChild(config);
-    var controls = ['name', 'technical_key', 'location', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'id_lang_default', 'active', 'deactivate_missing'];
+    var controls = ['name', 'technical_key', 'location', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'id_lang_default', 'active', 'deactivate_missing', 'delete_missing_days'];
     var selected = new Set();
     function selectGroup(element) {
       if (!element) return;
@@ -32,6 +32,16 @@
     function updateXmlPath() { xmlGroup.style.display = format.value === 'xml' ? '' : 'none'; }
     format.addEventListener('change', updateXmlPath);
     updateXmlPath();
+    var deleteDays = form.querySelector('[name="delete_missing_days"]');
+    var deleteDaysGroup = deleteDays ? deleteDays.closest('.form-group') : null;
+    var deactivateSwitches = Array.from(form.querySelectorAll('[name="deactivate_missing"]'));
+    function updateDeleteDays() {
+      if (!deleteDaysGroup) return;
+      var on = deactivateSwitches.some(function (input) { return input.checked && input.value === '1'; });
+      deleteDaysGroup.style.display = on ? '' : 'none';
+    }
+    deactivateSwitches.forEach(function (input) { input.addEventListener('change', updateDeleteDays); });
+    updateDeleteDays();
     ['pi-preview', 'pi-identifier-picker'].forEach(function (id) { selectGroup(document.getElementById(id)); });
     Array.from(wrapper.children).forEach(function (element) { if (selected.has(element)) general.appendChild(element); });
     var tree = document.getElementById('pi-root-category-tree');

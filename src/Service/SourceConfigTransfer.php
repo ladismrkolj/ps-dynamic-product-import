@@ -60,6 +60,7 @@ class SourceConfigTransfer
                 'language' => $lookups['language_iso']((int) $source['id_lang_default']),
                 'active' => (bool) $source['active'],
                 'deactivate_missing' => (bool) $source['deactivate_missing'],
+                'delete_missing_days' => MissingLifecycle::normalizeDays($source['delete_missing_days'] ?? null),
                 'source_format' => (string) $source['source_format'],
                 'location' => $source['location'] ?? null,
                 'xml_item_path' => $source['xml_item_path'] ?? null,
@@ -87,6 +88,7 @@ class SourceConfigTransfer
             . "#\n"
             . "# location:           where the feed comes from: an http:// or https:// URL, or a file path inside the import folder\n"
             . "#                     (relative paths are resolved inside it). source_format selects how the feed is read.\n"
+            . "# delete_missing_days: with deactivate_missing, delete a product that has been missing this many days. ~ or 0 = never.\n"
             . "# field_mapping:      PrestaShop field: feed expression.\n"
             . "# root_category:      where new categories are created. ~ or null = Home. Existing categories are never moved.\n"
             . "# category_mappings:  feed category path: PrestaShop category path below the shop root (names joined with ' > ',\n"
@@ -255,6 +257,7 @@ class SourceConfigTransfer
         foreach (self::FLAG_SETTINGS as $key) {
             $data[$key] = $in[$key] ? 1 : 0;
         }
+        $data['delete_missing_days'] = array_key_exists('delete_missing_days', $in) ? $in['delete_missing_days'] : MissingLifecycle::DEFAULT_DELETE_DAYS;
         [$data['technical_key'], $changed] = self::uniqueKey($in['technical_key'], $keyTaken);
         if ($changed) {
             $data['name'] = mb_substr($in['name'], 0, 191 - mb_strlen(self::IMPORTED_SUFFIX)) . self::IMPORTED_SUFFIX;
@@ -306,6 +309,9 @@ class SourceConfigTransfer
             if (array_key_exists($key, $in)) {
                 $changes[$key] = $in[$key] ? 1 : 0;
             }
+        }
+        if (array_key_exists('delete_missing_days', $in)) {
+            $changes['delete_missing_days'] = $in['delete_missing_days'];
         }
         $idLang = (int) $existing['id_lang_default'];
         if (array_key_exists('language', $in)) {
@@ -480,6 +486,13 @@ class SourceConfigTransfer
                 throw new \InvalidArgumentException('"source.' . $key . '" must be true or false.');
             }
             $source[$key] = $in[$key];
+        }
+        if (array_key_exists('delete_missing_days', $in)) {
+            $days = $in['delete_missing_days'];
+            if ($days !== null && (!is_int($days) || $days < 0 || $days > 36500)) {
+                throw new \InvalidArgumentException('"source.delete_missing_days" must be a number of days from 0 to 36500, or empty (never delete).');
+            }
+            $source['delete_missing_days'] = MissingLifecycle::normalizeDays($days);
         }
         foreach (['name', 'technical_key', 'identifier_field', 'location', 'xml_item_path', 'filter_expression'] as $key) {
             if (isset($source[$key])) {

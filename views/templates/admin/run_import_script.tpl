@@ -34,7 +34,7 @@
       (data.runs || []).forEach(function (run) {
         var row = document.createElement('p');
         var counts = run.counts || {};
-        row.textContent = run.name + ': ' + run.status + ' via ' + run.triggered_by + ' — created ' + counts.created + ', updated ' + counts.updated + ', unchanged ' + counts.unchanged + ', skipped ' + counts.skipped + ', failed ' + counts.failed;
+        row.textContent = run.name + ': ' + run.status + ' via ' + run.triggered_by + ' — created ' + counts.created + ', updated ' + counts.updated + ', unchanged ' + counts.unchanged + ', skipped ' + counts.skipped + ', failed ' + counts.failed + ', deleted ' + counts.deleted;
         output.appendChild(row);
         if (run.error_log) {
           var details = document.createElement('details');

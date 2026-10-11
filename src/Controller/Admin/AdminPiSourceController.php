@@ -41,6 +41,11 @@ class AdminPiSourceController extends ModuleAdminController
 
             return;
         }
+        if (Tools::isSubmit('submitPiRestore')) {
+            $this->restoreDeleted();
+
+            return;
+        }
         $saving = Tools::isSubmit('submitAddpi_source');
         $deleting = Tools::isSubmit('deletepi_source');
         if (!$saving && !$deleting) {
@@ -152,7 +157,7 @@ class AdminPiSourceController extends ModuleAdminController
                     'name' => (string) ($row['source_name'] ?? ''), 'status' => $row['status'],
                     'triggered_by' => $row['triggered_by'],
                     'counts' => ['created' => (int) $row['created_count'], 'updated' => (int) $row['updated_count'], 'unchanged' => (int) $row['unchanged_count'],
-                        'skipped' => (int) $row['skipped_count'], 'failed' => (int) $row['failed_count']],
+                        'skipped' => (int) $row['skipped_count'], 'failed' => (int) $row['failed_count'], 'deleted' => (int) $row['deleted_count']],
                     'error_log' => (string) ($row['error_log'] ?? '')];
             }
             $result = ['running' => \ProductImport\Service\ImportLauncher::isRunning(), 'runs' => $runs];
@@ -695,6 +700,9 @@ class AdminPiSourceController extends ModuleAdminController
         if (Tools::isSubmit('addpi_source') || Tools::isSubmit('updatepi_source') || Tools::isSubmit('submitAddpi_source')) {
             if ($this->access((int) Tools::getValue('id_source') > 0 ? 'edit' : 'add')) {
                 $this->content .= $this->renderForm();
+                if ((int) Tools::getValue('id_source') > 0 && $this->access('edit')) {
+                    $this->content .= $this->renderDeletedPanel((int) Tools::getValue('id_source'));
+                }
             }
         } elseif ($this->access('view')) {
             if ($this->access('add')) {
@@ -777,6 +785,12 @@ class AdminPiSourceController extends ModuleAdminController
             return;
         }
         $report = \ProductImport\Service\Upgrade\Upgrader::create()->run();
+        // Self-heal: a failed hook registration in the upgrade file would otherwise leave manual deletes untracked.
+        $module = Module::getInstanceByName('productimport');
+        if ($report['ok'] && (!$module || !$module->registerHook(ProductImport::HOOKS))) {
+            $report['ok'] = false;
+            $report['error'] = $this->trans('The product delete hooks could not be registered.');
+        }
         \ProductImport\Repository\SchemaStatus::reset();
         $lines = array_merge($report['statements'], $report['steps']);
         if ($lines !== []) {
@@ -817,6 +831,62 @@ class AdminPiSourceController extends ModuleAdminController
         $this->confirmations[] = $this->trans('Import folder saved.');
     }
 
+    /** Tombstones: products someone deleted in the store. Restoring forgets the link so the next run creates the product fresh. */
+    private function restoreDeleted(): void
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST' || !$this->access('edit') || !$this->checkToken()) {
+            $this->errors[] = $this->trans('You do not have permission or your security token is invalid.');
+
+            return;
+        }
+        $idSource = (int) Tools::getValue('id_source');
+        if ($idSource <= 0 || !$this->sources->find($idSource)) {
+            $this->errors[] = $this->trans('Source not found.');
+
+            return;
+        }
+        $externalId = Tools::getValue('restore_external_id', null);
+        try {
+            $links = new \ProductImport\Repository\ExternalProductRepository();
+            if (Tools::getValue('restore_all') === '1') {
+                $restored = $links->restoreTombstones($idSource);
+            } elseif (is_string($externalId) && $externalId !== '') {
+                $restored = $links->restoreTombstones($idSource, $externalId);
+            } else {
+                throw new InvalidArgumentException('Choose a deleted product to restore.');
+            }
+            $this->confirmations[] = sprintf($this->trans('%d product(s) will be created again by the next import run.'), $restored);
+        } catch (Throwable $error) {
+            $this->errors[] = Tools::safeOutput($error->getMessage());
+        }
+    }
+
+    private function renderDeletedPanel(int $idSource): string
+    {
+        try {
+            $rows = (new \ProductImport\Repository\ExternalProductRepository())->listTombstones($idSource);
+        } catch (Throwable $error) {
+            return '<div class="alert alert-warning">' . Tools::safeOutput($error->getMessage()) . '</div>';
+        }
+        $action = Tools::safeOutput(self::$currentIndex . '&token=' . $this->token . '&updatepi_source&id_source=' . $idSource);
+        $html = '<div class="panel" id="pi-deleted-products"><h3>' . Tools::safeOutput($this->trans('Deleted products')) . '</h3>'
+            . '<p class="help-block">' . Tools::safeOutput($this->trans('Products deleted in the store are skipped by the import. Restore forgets the link, so the next import run creates the product again from the feed. The new product gets a new ID and URL; fully restoring the old product needs a database backup.')) . '</p>';
+        if ($rows === []) {
+            return $html . '<p>' . Tools::safeOutput($this->trans('No deleted products.')) . '</p></div>';
+        }
+        $html .= '<table class="table"><thead><tr><th>' . Tools::safeOutput($this->trans('External ID')) . '</th><th>' . Tools::safeOutput($this->trans('Product')) . '</th><th>' . Tools::safeOutput($this->trans('Deleted')) . '</th><th></th></tr></thead><tbody>';
+        foreach ($rows as $row) {
+            $externalId = (string) $row['external_id'];
+            $name = trim((string) ($row['deleted_name'] ?? '')) !== '' ? (string) $row['deleted_name'] : $externalId;
+            $html .= '<tr><td>' . Tools::safeOutput($externalId) . '</td><td>' . Tools::safeOutput($name) . '</td><td>' . Tools::safeOutput((string) $row['date_deleted']) . '</td><td>'
+                . '<form method="post" action="' . $action . '"><input type="hidden" name="restore_external_id" value="' . Tools::safeOutput($externalId) . '">'
+                . '<button type="submit" name="submitPiRestore" value="1" class="btn btn-default btn-sm">' . Tools::safeOutput($this->trans('Restore')) . '</button></form></td></tr>';
+        }
+
+        return $html . '</tbody></table><form method="post" action="' . $action . '"><input type="hidden" name="restore_all" value="1">'
+            . '<button type="submit" name="submitPiRestore" value="1" class="btn btn-default">' . Tools::safeOutput($this->trans('Restore all')) . '</button></form></div>';
+    }
+
     private function renderFeedDirPanel(): string
     {
         if (!$this->access('edit')) {
@@ -845,7 +915,7 @@ class AdminPiSourceController extends ModuleAdminController
         $source += [
             'name' => '', 'technical_key' => '', 'location' => '', 'source_format' => 'json', 'xml_item_path' => '',
             'identifier_field' => '', 'filter_expression' => '', 'field_mapping' => '{}', 'active' => 1,
-            'variant_mapping' => null, 'root_category_id' => null, 'id_supplier' => null, 'id_lang_default' => 1, 'deactivate_missing' => 0,
+            'variant_mapping' => null, 'root_category_id' => null, 'id_supplier' => null, 'id_lang_default' => 1, 'deactivate_missing' => 0, 'delete_missing_days' => \ProductImport\Service\MissingLifecycle::DEFAULT_DELETE_DAYS,
         ];
         $source['source_format'] = \ProductImport\Service\Format\FeedFormats::has((string) $source['source_format']) ? $source['source_format'] : 'json';
         $mapping = json_decode($source['field_mapping'], true);
@@ -935,6 +1005,10 @@ class AdminPiSourceController extends ModuleAdminController
                 'desc' => $field === 'deactivate_missing' ? $this->trans('After a successful fetch, untouched products are deactivated and untouched combinations receive zero stock.') : '',
             ];
         }
+        $inputs[] = [
+            'type' => 'text', 'name' => 'delete_missing_days', 'id' => 'delete_missing_days', 'label' => $this->trans('Delete after (days)'), 'class' => 'fixed-width-sm', 'suffix' => $this->trans('days'),
+            'desc' => $this->trans('A product that is missing from the feed is hidden and redirects (301) to its default category, unless you set a redirect of your own. When it has been missing for this many days it is deleted for good, only if it is still inactive and no other source links to it. Empty or 0 never deletes. Choose a period longer than your seasonal gaps: products that return after being deleted are created again with a new ID and URL. PrestaShop has no trash, so a deleted product can only be recovered from a database backup.'),
+        ];
         $helper = new HelperForm();
         $helper->table = $this->table;
         $helper->identifier = $this->identifier;
@@ -981,6 +1055,11 @@ class AdminPiSourceController extends ModuleAdminController
         foreach (['active', 'deactivate_missing'] as $field) {
             $data[$field] = (int) (Tools::getValue($field) === '1');
         }
+        $days = Tools::getValue('delete_missing_days', '');
+        if (!is_string($days) || ($days !== '' && (!ctype_digit($days) || (int) $days > 36500))) {
+            throw new InvalidArgumentException('Delete after must be a number of days from 0 to 36500, or empty.');
+        }
+        $data['delete_missing_days'] = \ProductImport\Service\MissingLifecycle::normalizeDays($days);
         $root = Tools::getValue('root_category_id', '');
         $supplier = Tools::getValue('id_supplier', '');
         $language = Tools::getValue('id_lang_default', '1');

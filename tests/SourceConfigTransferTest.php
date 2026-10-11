@@ -500,6 +500,30 @@ class SourceConfigTransferTest extends TestCase
         self::assertSame('{"name":"fields.n"}', $source['field_mapping']);
     }
 
+    public function testDeleteMissingDaysRoundTripsDefaultsAndOverwrites(): void
+    {
+        $transfer = new SourceConfigTransfer();
+        $document = $transfer->build(self::source(['delete_missing_days' => '45']), [], [], self::lookups(), '0.18.0', 'now');
+        self::assertSame(45, $document['source']['delete_missing_days']);
+        $parsed = $transfer->parse(SourceConfigTransfer::encode($document));
+        self::assertSame(45, $parsed['source']['delete_missing_days']);
+        self::assertSame(45, $transfer->resolve($parsed, self::importLookups(), static fn () => false)['source']['delete_missing_days']);
+
+        $never = $transfer->build(self::source(['delete_missing_days' => '0']), [], [], self::lookups(), '0.18.0', 'now');
+        self::assertNull($never['source']['delete_missing_days']);
+        $reparsed = $transfer->parse(SourceConfigTransfer::encode($never));
+        self::assertNull($transfer->resolve($reparsed, self::importLookups(), static fn () => false)['source']['delete_missing_days']);
+
+        $absent = $transfer->parse(Yaml::dump(['format' => 'productimport-source', 'version' => 1, 'source' => array_diff_key($document['source'], ['delete_missing_days' => 1])]));
+        self::assertSame(90, $transfer->resolve($absent, self::importLookups(), static fn () => false)['source']['delete_missing_days']);
+
+        $result = $transfer->resolveOverwrite($transfer->parse("format: productimport-source\nversion: 1\nsource:\n  delete_missing_days: 10\n", true), self::existing(), self::importLookups());
+        self::assertSame(['delete_missing_days' => 10], $result['source']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $transfer->parse("format: productimport-source\nversion: 1\nsource:\n  delete_missing_days: -1\n", true);
+    }
+
     public function testExportQuotesMappingsAndRoundTrips(): void
     {
         $cats = [['source_path' => '["It\'s: a # b","X"]', 'id_category' => '6'], ['source_path' => '["2024"]', 'id_category' => null]];

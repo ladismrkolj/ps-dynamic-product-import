@@ -251,11 +251,25 @@ The module does not edit the server's crontab. A nonblocking local `flock` in th
 
 ### Run log
 
-Catalog > Product Import runs shows the latest 100 runs (or one source's latest 20 with `?id_source=`), read-only, with source, time, trigger (`cron`, `cron-background`, `admin-background`, `admin-manual`, `cli`), status, counts and error log. Counts are created, updated, unchanged, skipped (filtered) and failed (item, variant and stale-cleanup failures). Status is `completed`, `completed_with_errors` or `failed` (fetch, start or configuration failure). Field mapping errors are logged but do not count as failed. Logs are capped at 65,536 bytes, with a truncation marker.
+Catalog > Product Import runs shows the latest 100 runs (or one source's latest 20 with `?id_source=`), read-only, with source, time, trigger (`cron`, `cron-background`, `admin-background`, `admin-manual`, `cli`), status, counts and error log. Counts are created, updated, unchanged, skipped (filtered or tombstoned), failed (item, variant and stale-cleanup failures) and deleted (auto-deleted missing products). Status is `completed`, `completed_with_errors` or `failed` (fetch, start or configuration failure). Field mapping errors are logged but do not count as failed. Logs are capped at 65,536 bytes, with a truncation marker.
 
-### deactivate_missing
+### Missing products: deactivate, redirect, delete
 
-After a successful fetch, with `deactivate_missing` on, every linked product not seen in this run is set inactive and every unseen combination gets zero stock. That includes items now filtered out or failing, and every link after a valid empty feed. Nothing is deleted. Stale combinations are not hidden. A fetch failure does no cleanup.
+With `deactivate_missing` on and after a successful fetch, every linked product not seen in this run is set inactive and every unseen combination gets zero stock. That includes items now filtered out or failing, and every link after a valid empty feed. Stale combinations are not hidden. A fetch failure does no cleanup, and the empty-feed guard (a first empty feed skips cleanup) also guards deletion.
+
+- **Redirect.** When the import hides a product as missing and its redirect is `default` or empty, it sets the redirect to `301-category` (moved permanently to the default category, so PrestaShop uses `id_category_default`). A redirect you chose yourself is never changed. A returning product is reactivated by the next import and its redirect fields are left alone, because they do not matter while it is active.
+- **Missing since.** `pi_external_product.date_missing` records when a link was first found missing. It is set by the first stale cleanup that misses the item and cleared when the item is seen again.
+- **Auto-delete.** The source setting **Delete after (days)** (`delete_missing_days`, default 90, shown with the deactivate setting; empty or 0 = never; also in the YAML export) deletes the product (`Product::delete()`) when all of these hold during stale cleanup: `date_missing` is more than that many days old, the product is still inactive (a product you reactivated by hand is kept), and no other live link (another source, or another item) points to the same product. The link, its combination links and its image memory are removed first and the product is deleted after that (the link is put back if the delete fails), with no tombstone, so a returning item is created fresh with a new ID and URL. Choose a period longer than the seasonal gaps in your feed. Sources that existed before 0.18.0 got the default; since `date_missing` starts empty, nothing can be deleted before that many days after the upgrade. Each deletion is logged with the product ID and external ID, and counted as `deleted` in the run list.
+- **What counts as missing.** Only items that are absent from the feed or filtered out start the clock and can be deleted (filtering an item out is the way to get rid of it). An item that is in the feed and passes the filter but fails to import is *not* missing: it is still deactivated as before, but its clock never starts and it is never deleted. A run with any failure (a failing item, a variant or related-product error, or an item without an identifier value, for example after renaming the identifier field) deletes nothing at all and logs why; deactivation and the missing-since bookkeeping still run.
+- **PrestaShop has no trash.** A deleted product is gone for good and can only be recovered from a database backup.
+
+### Products deleted in the store (tombstones)
+
+When anyone other than the module deletes a linked product, the hook `actionProductDelete` marks its links as deleted (`pi_external_product.date_deleted`, plus the last known product name) and removes its combination links and image memory. The import then skips that item: no create, no update, no error, no deactivation. The run counts it as skipped and the log says so once, summarised. Stale cleanup ignores tombstones. A link whose product is missing but has no tombstone (deleted before 0.18.0 or while the hook was absent) is turned into a tombstone the same way, by the import and by stale cleanup, instead of failing.
+
+The source editor lists the tombstones under **Deleted products** (external ID, last known name or else the external ID, date deleted) with **Restore** per row and **Restore all** (edit permission and the admin token are required). Restore removes the link row, so the next run creates the product again from the feed. The new product gets a new ID and URL; fully restoring the old product needs a database backup.
+
+**Combinations** deleted by hand (hook `actionObjectCombinationDeleteAfter`) only lose their combination link, with no tombstone. The next run recreates the variant while the feed still has it.
 
 ### Resilience
 
@@ -264,7 +278,7 @@ After a successful fetch, with `deactivate_missing` on, every linked product not
 - **Background start.** An exclusive `productimport-starting.marker` in the cache directory stops two simultaneous requests from both spawning an import. The second gets HTTP 409. The import clears the marker once it holds the lock, and a marker older than 60 s is stale.
 - **Image memory.** `pi_image_source` maps each image URL (SHA-1) to the image it produced, so a known URL is reused without a download. If the image was deleted, the mapping is dropped and the URL is fetched, matched by fingerprint and reattached.
 - **Per-run caches.** Category, brand and attribute lookups are cached once per distinct input per run. Preview misses are never cached.
-- Catalog writes and links are not transactional, so a crash can leave a partial product or a `running` log. Concurrent auto-creation is not protected, so run imports serially. Only the current shop context is supported, with no multistore orchestration.
+- Catalog writes and links are not transactional, so a crash can leave a partial product or a `running` log. Concurrent auto-creation is not protected, so run imports serially. Only the current shop context is supported, with no multistore orchestration. In a multistore install, removing a product from just one shop does not fire the delete hook (PrestaShop fires `actionProductDelete` only when the product disappears completely), so no tombstone is recorded for it.
 
 ## Config export and import
 

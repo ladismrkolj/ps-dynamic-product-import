@@ -17,7 +17,7 @@ class ImportRunRepository
     public function finish(int $idRun, string $status, array $counts, string $errorLog): void
     {
         $sets = ["`status` = '" . pSQL($status) . "'", '`finished_at` = NOW()', "`error_log` = '" . pSQL(self::capLog($errorLog), true) . "'"];
-        foreach (['created', 'updated', 'unchanged', 'skipped', 'failed'] as $key) {
+        foreach (['created', 'updated', 'unchanged', 'skipped', 'failed', 'deleted'] as $key) {
             $sets[] = '`' . $key . '_count` = ' . (int) max(0, $counts[$key] ?? 0);
         }
         if (!\Db::getInstance()->execute('UPDATE `' . _DB_PREFIX_ . 'pi_import_run` SET ' . implode(', ', $sets) . ' WHERE `id_run` = ' . (int) $idRun)) {

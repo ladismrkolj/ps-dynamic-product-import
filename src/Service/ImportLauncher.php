@@ -69,7 +69,7 @@ class ImportLauncher
                     $ready[] = $source;
                 } catch (\Throwable $error) {
                     $runs = new ImportRunRepository();
-                    $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0];
+                    $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0];
                     $message = $error->getMessage();
                     try {
                         $idRun = $runs->start((int) $source['id_source'], $triggeredBy);

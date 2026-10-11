@@ -37,7 +37,7 @@ class ImportRunner
     {
         $idSource = (int) $source['id_source'];
         $idRun = $this->runs->start($idSource, $triggeredBy);
-        $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0];
+        $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0];
         $log = '';
         try {
             $items = ($this->fetcher)($source);
@@ -62,8 +62,12 @@ class ImportRunner
                 $this->sourceRepository->setConsecutiveEmptyCount($idSource, 0);
             }
         }
+        $tombstones = array_flip($this->productLinks->findTombstonedExternalIds($idSource));
+        $tombstoneSkipped = 0;
         /** @var array<int, array{external_id: string, index: int|string, entries: list<string>}> */
         $pendingRelated = [];
+        /** @var array<string, true> external ids of every item in this feed that passed the filter, whether it imported or failed */
+        $present = [];
         foreach ($items as $index => $item) {
             $externalId = null;
             try {
@@ -75,7 +79,20 @@ class ImportRunner
                     ++$counts['skipped'];
                     continue;
                 }
+                $present[$externalId] = true;
+                if (isset($tombstones[$externalId])) {
+                    ++$counts['skipped'];
+                    ++$tombstoneSkipped;
+                    continue;
+                }
                 $existing = $this->productLinks->findProductId($idSource, $externalId);
+                if ($existing !== null && !$this->productLinks->productExists($existing)) {
+                    // Deleted before the delete hook existed or while it was missing: treat it as a deleted product.
+                    $this->productLinks->tombstoneProduct($existing);
+                    ++$counts['skipped'];
+                    ++$tombstoneSkipped;
+                    continue;
+                }
                 $mapped = $this->mapper->map($item, $source['field_mapping']);
                 foreach ($mapped['errors'] as $field => $error) {
                     $this->log($log, "item $index field $field: $error");
@@ -91,7 +108,7 @@ class ImportRunner
                 $manufacturer = $this->manufacturers->resolve($values['manufacturer'] ?? null, $idSource, true, isset($source['default_id_manufacturer']) ? (int) $source['default_id_manufacturer'] : null);
                 $idSupplier = isset($source['id_supplier']) && $source['id_supplier'] !== null ? (int) $source['id_supplier'] : null;
                 $feedHash = self::feedHash($item, $source, $categoryIds, $manufacturer, $this->moduleVersion());
-                if ($existing !== null && $this->productLinks->findFeedHash($idSource, $externalId) === $feedHash && $this->productLinks->productExists($existing)) {
+                if ($existing !== null && $this->productLinks->findFeedHash($idSource, $externalId) === $feedHash) {
                     $this->productLinks->markSeen($idSource, $externalId, $existing, $idRun);
                     ++$counts['unchanged'];
                     continue;
@@ -157,7 +174,16 @@ class ImportRunner
                 }
                 // Only a fully imported item may be skipped next time.
                 $this->productLinks->setFeedHash($idSource, $externalId, $variantFailed ? null : $feedHash);
+            } catch (ProductDeletedException) {
+                if ($externalId !== null) {
+                    $present[$externalId] = true;
+                }
+                ++$counts['skipped'];
+                ++$tombstoneSkipped;
             } catch (\Throwable $error) {
+                if ($externalId !== null) {
+                    $present[$externalId] = true;
+                }
                 ++$counts['failed'];
                 $this->log($log, "item $index: " . $error->getMessage());
                 if (isset($externalId)) {
@@ -171,20 +197,63 @@ class ImportRunner
         if ($pendingRelated !== []) {
             $this->importRelated($idSource, $pendingRelated, $counts, $log);
         }
+        if ($tombstoneSkipped > 0) {
+            $this->log($log, "$tombstoneSkipped item(s) skipped: their product was deleted in the store (see Deleted products on the source page to restore).");
+        }
         if (!$skipCleanup && !empty($source['deactivate_missing'])) {
             try {
+                $days = MissingLifecycle::normalizeDays($source['delete_missing_days'] ?? null);
+                // A run with any failure (including an item without an identifier) cannot tell missing from broken: never delete in it.
+                $deletionBlocked = $counts['failed'] > 0;
+                if ($deletionBlocked && $days !== null) {
+                    $this->log($log, 'Auto-delete skipped: this run had failures, so a missing product could be a failing one.');
+                }
                 foreach ($this->productLinks->findStaleForSource($idSource, $idRun) as $row) {
                     try {
+                        $externalId = (string) $row['external_id'];
+                        $idProduct = (int) $row['id_product'];
+                        if (!$this->productLinks->productExists($idProduct)) {
+                            // Deleted without the delete hook: a tombstone, not a failure.
+                            $this->productLinks->tombstoneProduct($idProduct);
+                            continue;
+                        }
+                        // An item present in the feed that failed to import is not missing: it is still hidden below, but its clock never starts and it is never deleted.
+                        if (!isset($present[$externalId])) {
+                            $now = time();
+                            $dateMissing = $row['date_missing'] ?? null;
+                            $started = MissingLifecycle::firstMissing($dateMissing, date('Y-m-d H:i:s', $now));
+                            if ($started !== $dateMissing) {
+                                $this->productLinks->markMissing($idSource, $externalId, $started);
+                                $dateMissing = $started;
+                            }
+                            if (!$deletionBlocked && MissingLifecycle::isExpired($dateMissing, $days, $now)
+                                && MissingLifecycle::shouldDelete($dateMissing, $days, $now, !$this->catalog->isProductActive($idProduct), $this->productLinks->hasLinkFromOtherSource($idProduct, $idSource, $externalId))) {
+                                // Links go first: a failure after Product::delete() would otherwise leave a link to a deleted product, which the next run would tombstone.
+                                $this->productLinks->unlink($idSource, $externalId);
+                                $this->productLinks->forgetProductDetails($idProduct);
+                                try {
+                                    $this->catalog->deleteProduct($idProduct);
+                                } catch (\Throwable $error) {
+                                    if ($this->productLinks->productExists($idProduct)) {
+                                        $this->productLinks->link($idSource, $externalId, $idProduct);
+                                    }
+                                    throw $error;
+                                }
+                                ++$counts['deleted'];
+                                $this->log($log, "Deleted product $idProduct (external id $externalId): missing since $dateMissing.");
+                                continue;
+                            }
+                        }
                         // The import owns `active` only while it still holds the value the import last wrote.
                         $imported = ImportedValues::decode($row['imported_values'] ?? null);
                         $inactive = ImportedValues::fingerprint(['active' => '0'])['active'];
                         $importedActive = isset($imported['active']) ? $imported['active'] !== $inactive : null;
-                        if ($this->catalog->deactivateProduct((int) $row['id_product'], $importedActive) && $importedActive !== false) {
+                        if ($this->catalog->deactivateProduct($idProduct, $importedActive) && $importedActive !== false) {
                             $imported['active'] = $inactive;
-                            $this->productLinks->saveImportedValues($idSource, (string) $row['external_id'], $imported);
+                            $this->productLinks->saveImportedValues($idSource, $externalId, $imported);
                         }
                         // A returning identical item must be imported again, or it would stay inactive.
-                        $this->productLinks->setFeedHash($idSource, (string) $row['external_id'], null);
+                        $this->productLinks->setFeedHash($idSource, $externalId, null);
                     } catch (\Throwable $error) {
                         ++$counts['failed'];
                         $this->log($log, 'Deactivate product: ' . $error->getMessage());
@@ -218,7 +287,7 @@ class ImportRunner
             try {
                 $results[] = $this->runOne($source, $triggeredBy);
             } catch (\Throwable $error) {
-                $results[] = ['id_source' => $source['id_source'], 'status' => 'failed', 'triggered_by' => $triggeredBy, 'counts' => ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0], 'error_log' => ImportRunRepository::capLog($error->getMessage())];
+                $results[] = ['id_source' => $source['id_source'], 'status' => 'failed', 'triggered_by' => $triggeredBy, 'counts' => ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0], 'error_log' => ImportRunRepository::capLog($error->getMessage())];
             }
         }
         return $results;

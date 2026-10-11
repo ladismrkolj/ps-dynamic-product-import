@@ -30,7 +30,9 @@ class ProductImporter
         $id = $link['id_product'] ?? null;
         $product = $id === null ? new \Product() : new \Product($id);
         if ($id !== null && !\Validate::isLoadedObject($product)) {
-            throw new \RuntimeException('Linked product no longer exists: ' . $id);
+            // Deleted before the delete hook existed or while it was missing: treat it as a deleted product.
+            $this->products->tombstoneProduct($id);
+            throw new ProductDeletedException('Linked product no longer exists: ' . $id);
         }
         $isNew = $id === null;
         if ($isNew && trim((string) ($mappedValues['name'] ?? '')) === '') {

@@ -13,6 +13,7 @@ class Migrations
             new SourceFormatStep(),
             new ObsoleteTabsStep(),
             new FeedDirStep(),
+            new DeleteMissingDaysStep(),
         ];
     }
 }

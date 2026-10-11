@@ -41,8 +41,13 @@ class CombinationImporter
         $link = $this->combinations->findLink($idSource, $externalId);
         $id = $link['id_product_attribute'] ?? null;
         $combination = $id === null ? new \Combination() : new \Combination($id);
-        if ($id !== null && (!\Validate::isLoadedObject($combination) || (int) $combination->id_product !== $idProduct)) {
-            throw new \RuntimeException('Linked combination is missing or belongs to another product.');
+        if ($id !== null && !\Validate::isLoadedObject($combination)) {
+            // Deleted by hand: the feed still has the variant, so it is created again.
+            $link = null;
+            $id = null;
+            $combination = new \Combination();
+        } elseif ($id !== null && (int) $combination->id_product !== $idProduct) {
+            throw new \RuntimeException('Linked combination belongs to another product.');
         }
         // Fields whose store value differs from what the import last wrote were edited manually: keep them.
         $imported = $link['imported_values'] ?? [];

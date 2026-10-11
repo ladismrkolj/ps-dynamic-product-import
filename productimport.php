@@ -8,11 +8,14 @@ require_once __DIR__ . '/vendor/autoload.php';
 
 class ProductImport extends Module
 {
+    /** Hooks that keep the import links in step with products and combinations deleted in the store. */
+    public const HOOKS = ['actionProductDelete', 'actionObjectCombinationDeleteAfter'];
+
     public function __construct()
     {
         $this->name = 'productimport';
         $this->tab = 'administration';
-        $this->version = '0.17.3';
+        $this->version = '0.18.0';
         $this->author = 'Product Import';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -40,6 +43,9 @@ class ProductImport extends Module
             return false;
         }
         if (!\ProductImport\Service\Upgrade\Upgrader::create()->markAllApplied()) {
+            return false;
+        }
+        if (!$this->registerHook(self::HOOKS)) {
             return false;
         }
         foreach (['AdminPiSource' => 'Product Import', 'AdminPiRunLog' => 'Product Import runs'] as $class => $title) {
@@ -76,6 +82,36 @@ class ProductImport extends Module
         }
 
         return parent::uninstall();
+    }
+
+    /** A product was deleted: unless this module deleted it, its links become tombstones and the import skips it from now on. */
+    public function hookActionProductDelete($params)
+    {
+        $idProduct = (int) ($params['id_product'] ?? 0);
+        if ($idProduct <= 0 || \ProductImport\Service\ImportCatalog::isDeleting($idProduct)) {
+            return;
+        }
+        try {
+            $names = isset($params['product']) && is_object($params['product']) ? $params['product']->name : null;
+            $name = is_array($names) ? ($names[(int) Configuration::get('PS_LANG_DEFAULT')] ?? reset($names)) : $names;
+            (new \ProductImport\Repository\ExternalProductRepository())->tombstoneProduct($idProduct, is_string($name) ? $name : null);
+        } catch (\Throwable $error) {
+            PrestaShopLogger::addLog('productimport: unable to record deleted product ' . $idProduct . ': ' . $error->getMessage(), 3, null, 'Product', $idProduct, true);
+        }
+    }
+
+    /** A combination was deleted by hand: forget its link so the next run recreates it while the feed still has the variant. */
+    public function hookActionObjectCombinationDeleteAfter($params)
+    {
+        $idCombination = isset($params['object']) && is_object($params['object']) ? (int) $params['object']->id : 0;
+        if ($idCombination <= 0) {
+            return;
+        }
+        try {
+            (new \ProductImport\Repository\ExternalCombinationRepository())->unlinkCombination($idCombination);
+        } catch (\Throwable $error) {
+            PrestaShopLogger::addLog('productimport: unable to unlink deleted combination ' . $idCombination . ': ' . $error->getMessage(), 3, null, 'Combination', $idCombination, true);
+        }
     }
 
     public function getContent()

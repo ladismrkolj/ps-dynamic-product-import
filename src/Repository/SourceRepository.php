@@ -41,7 +41,7 @@ class SourceRepository
                 throw new \InvalidArgumentException('Missing source property: ' . $required);
             }
         }
-        $data += ['active' => 1, 'root_category_id' => null, 'id_supplier' => null, 'id_lang_default' => 1, 'deactivate_missing' => 0];
+        $data += ['active' => 1, 'root_category_id' => null, 'id_supplier' => null, 'id_lang_default' => 1, 'deactivate_missing' => 0, 'delete_missing_days' => \ProductImport\Service\MissingLifecycle::DEFAULT_DELETE_DAYS];
         $assignments = $this->assignments($data);
         $now = pSQL(date('Y-m-d H:i:s'));
         $assignments[] = "`date_add` = '" . $now . "'";
@@ -129,6 +129,9 @@ class SourceRepository
         }
         if (array_key_exists('id_lang_default', $data)) {
             $assignments[] = '`id_lang_default` = ' . (int) $data['id_lang_default'];
+        }
+        if (array_key_exists('delete_missing_days', $data)) {
+            $assignments[] = '`delete_missing_days` = ' . ($data['delete_missing_days'] === null ? 'NULL' : max(0, (int) $data['delete_missing_days']));
         }
 
         return $assignments;
