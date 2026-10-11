@@ -12,7 +12,7 @@ if (!defined('_PS_VERSION_')) {
 
 function upgrade_module_0_17_0($module)
 {
-    require_once dirname(__DIR__) . '/vendor/autoload.php';
+    require_once __DIR__ . '/autoload.php';
 
     return \ProductImport\Service\Upgrade\Upgrader::create()->run()['ok'];
 }

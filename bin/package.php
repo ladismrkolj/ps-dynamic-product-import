@@ -142,7 +142,7 @@ if ($composerOption !== null) {
     $composer = getenv('COMPOSER') ?: 'composer';
 }
 [$code] = run(
-    $composer . ' install --no-dev --optimize-autoloader --classmap-authoritative --no-interaction',
+    $composer . ' install --no-dev --optimize-autoloader --no-interaction',
     $module,
     true
 );
