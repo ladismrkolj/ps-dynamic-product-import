@@ -11,7 +11,7 @@ class ExpressionEvaluator
     public function __construct()
     {
         $this->language = new ExpressionLanguage();
-        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs'] as $name) {
+        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs', 'common', 'pick'] as $name) {
             $this->language->register(
                 $name,
                 static function (...$arguments) use ($name) {
@@ -208,6 +208,71 @@ class ExpressionEvaluator
         }
 
         return $map;
+    }
+
+    /**
+     * Merges a list of {name: value} objects into one map, keeping only names whose non-empty scalar values
+     * (compared as trimmed text) agree in every object; a single object counts as a one-entry list.
+     */
+    public static function common($list): array
+    {
+        if ($list === null) {
+            return [];
+        }
+        if (!is_array($list)) {
+            throw new \InvalidArgumentException('common() expects a list of objects.');
+        }
+        $merged = [];
+        $conflicts = [];
+        foreach (array_is_list($list) ? $list : [$list] as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            foreach ($entry as $name => $value) {
+                if (!is_scalar($value) || trim((string) $value) === '') {
+                    continue;
+                }
+                $name = (string) $name;
+                $text = trim((string) $value);
+                if (!array_key_exists($name, $merged)) {
+                    $merged[$name] = $text;
+                } elseif ($merged[$name] !== $text) {
+                    $conflicts[$name] = true;
+                }
+            }
+        }
+
+        return array_diff_key($merged, $conflicts);
+    }
+
+    /** Keeps the listed keys of a map, in the order of $names, renamed when $names is a {feed name: new name} map; the first present synonym wins. */
+    public static function pick($map, $names): array
+    {
+        if ($map === null) {
+            return [];
+        }
+        if (!is_array($map)) {
+            throw new \InvalidArgumentException('pick() expects a map.');
+        }
+        if (!is_array($names)) {
+            throw new \InvalidArgumentException('pick() expects a list of names or a {name: new name} map.');
+        }
+        $picked = [];
+        foreach ($names as $from => $to) {
+            if (array_is_list($names)) {
+                $from = $to;
+            }
+            if (!is_scalar($from) || !is_scalar($to) || array_key_exists((string) $to, $picked)) {
+                continue;
+            }
+            $value = $map[(string) $from] ?? null;
+            if (!is_scalar($value) || trim((string) $value) === '') {
+                continue;
+            }
+            $picked[(string) $to] = $value;
+        }
+
+        return $picked;
     }
 
     private static function text(string $function, $value): ?string
