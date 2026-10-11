@@ -17,7 +17,8 @@ PrestaShop 9.x module at repo root. Scrapers live elsewhere; JSON/XML feeds are 
 - Commit after each verified unit of work (tests passing, plus store checks when the change needs them). Push and release only when the user asks.
 - One logical change per commit, with an imperative subject (`productimport: …`) and a body that says what changed and why.
 - Git has no identity configured here. Use the author from the latest commit through GIT_AUTHOR_* / GIT_COMMITTER_* environment variables; don't change git config.
-- Don't commit .omp/, vendor/, local-dev/.env or test-store data.
+- Don't commit .omp/, vendor/, local-dev/.env, test-store data, or feed files and supplier exports (the repo is public).
+- Never stage with `git add -A`, `git add .` or `git commit -a`. Stage explicit paths, and check `git status` for untracked files before every commit. A file you didn't create in this change is the user's: ask before committing it.
 
 ## Challenge requests
 

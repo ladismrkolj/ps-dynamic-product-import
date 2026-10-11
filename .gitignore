@@ -6,3 +6,14 @@
 /local-dev/.env
 .DS_Store
 /dist/
+
+# Feed data and exports never belong in the repo: only the module's own root files are tracked.
+/*.json
+!/composer.json
+/*.xml
+!/config.xml
+!/phpunit.xml.dist
+/*.yaml
+/*.yml
+/*.csv
+/sources/
