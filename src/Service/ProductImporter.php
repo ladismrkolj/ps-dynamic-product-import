@@ -2,6 +2,7 @@
 
 namespace ProductImport\Service;
 
+use PrestaShop\PrestaShop\Core\Domain\Product\ValueObject\DeliveryTimeNoteType;
 use ProductImport\Repository\ExternalProductRepository;
 
 class ProductImporter
@@ -63,6 +64,26 @@ class ProductImporter
                 }
             }
         }
+        foreach (['available_now', 'available_later', 'delivery_in_stock', 'delivery_out_stock', 'meta_title', 'meta_description'] as $field) {
+            if (isset($mappedValues[$field]) && $write($field . '.' . $idLangDefault)) {
+                $translations = is_array($product->$field) ? $product->$field : [];
+                $translations[$idLangDefault] = (string) $mappedValues[$field];
+                $product->$field = $translations;
+            }
+        }
+        $deliveryTime = isset($mappedValues['delivery_time']) ? (int) $mappedValues['delivery_time'] : (isset($mappedValues['delivery_in_stock']) || isset($mappedValues['delivery_out_stock']) ? DeliveryTimeNoteType::TYPE_SPECIFIC : null);
+        if ($deliveryTime !== null && $write('delivery_time')) {
+            $product->additional_delivery_times = $deliveryTime;
+        }
+        if (isset($mappedValues['additional_shipping_cost']) && $write('additional_shipping_cost')) {
+            $product->additional_shipping_cost = (float) $mappedValues['additional_shipping_cost'];
+        }
+        if (isset($mappedValues['on_sale']) && $write('on_sale')) {
+            $product->on_sale = (bool) $mappedValues['on_sale'];
+        }
+        // Resolved by the runner: features as [id_feature, id_feature_value] rows, carriers as id_reference values.
+        $writeFeatures = is_array($mappedValues['features'] ?? null) && $write('features');
+        $writeCarriers = is_array($mappedValues['carriers'] ?? null) && $write('carriers');
         // ObjectModel requires name/link_rewrite in the shop default language too.
         if ($isNew) {
             $shopLanguage = (int) \Configuration::get('PS_LANG_DEFAULT');
@@ -121,11 +142,27 @@ class ProductImporter
         if (!$product->save()) {
             throw new \RuntimeException('Unable to save product: ' . $externalId);
         }
+        if ($isNew) {
+            // Link at once: a failure further down must not leave an orphan that the next run duplicates.
+            $this->products->link($idSource, $externalId, (int) $product->id, null, null);
+        }
         if ($writeCategories && !$product->updateCategories($categoryIds)) {
             throw new \RuntimeException('Unable to update product categories: ' . $externalId);
         }
         if ($isNew && $categoryIds === [] && !$product->updateCategories([(int) $product->id_category_default])) {
             throw new \RuntimeException('Unable to associate new product with its default category.');
+        }
+        if ($writeFeatures) {
+            $product->deleteFeatures();
+            foreach ($mappedValues['features'] as $feature) {
+                if (!\Product::addFeatureProductImport((int) $product->id, (int) $feature['id_feature'], (int) $feature['id_feature_value'])) {
+                    throw new \RuntimeException('Unable to assign product features: ' . $externalId);
+                }
+            }
+            \SpecificPriceRule::applyAllRules([(int) $product->id]);
+        }
+        if ($writeCarriers) {
+            $product->setCarriers(array_map('intval', $mappedValues['carriers']));
         }
         if ($idSupplier !== null) {
             // The feed identifier becomes the supplier reference of the product itself.
@@ -154,6 +191,66 @@ class ProductImporter
         return (int) $product->id;
     }
 
+    /**
+     * Second-pass write of the related products (accessories), once every product of the run exists. Returns false,
+     * leaving them alone, when the store holds a list other than the one the import last wrote.
+     *
+     * @param list<int> $relatedIds
+     */
+    public function importRelated(int $idSource, string $externalId, int $idProduct, array $relatedIds): bool
+    {
+        $link = $this->products->findLink($idSource, $externalId);
+        $imported = $link['imported_values'] ?? [];
+        $current = ImportedValues::fingerprint(['related_products' => self::relatedFingerprint($idProduct)]);
+        if (!ImportedValues::writable($imported, $current, 'related_products')) {
+            return false;
+        }
+        $db = \Db::getInstance();
+        if (!$db->delete('accessory', 'id_product_1 = ' . $idProduct)) {
+            throw new \RuntimeException('Unable to clear related products.');
+        }
+        \Product::changeAccessoriesForProduct(array_values(array_unique(array_map('intval', $relatedIds))), $idProduct);
+        $saved = ImportedValues::fingerprint(['related_products' => self::relatedFingerprint($idProduct)]);
+        $this->products->saveImportedValues($idSource, $externalId, $saved + $imported);
+
+        return true;
+    }
+
+    private static function relatedFingerprint(int $idProduct): string
+    {
+        $rows = \Db::getInstance()->executeS('SELECT `id_product_2` FROM `' . _DB_PREFIX_ . 'accessory` WHERE `id_product_1` = ' . $idProduct);
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to read related products.');
+        }
+
+        return NativeFields::listFingerprint(array_column($rows, 'id_product_2'));
+    }
+
+    private static function featuresFingerprint(int $idProduct, int $idLang): string
+    {
+        $rows = \Db::getInstance()->executeS(
+            'SELECT fl.`name`, fvl.`value` FROM `' . _DB_PREFIX_ . 'feature_product` fp'
+            . ' INNER JOIN `' . _DB_PREFIX_ . 'feature_lang` fl ON fl.`id_feature` = fp.`id_feature` AND fl.`id_lang` = ' . $idLang
+            . ' INNER JOIN `' . _DB_PREFIX_ . 'feature_value_lang` fvl ON fvl.`id_feature_value` = fp.`id_feature_value` AND fvl.`id_lang` = ' . $idLang
+            . ' WHERE fp.`id_product` = ' . $idProduct
+        );
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to read product features.');
+        }
+
+        return NativeFields::listFingerprint(array_map(static fn (array $row): string => $row['name'] . '=' . $row['value'], $rows));
+    }
+
+    private static function carriersFingerprint(\Product $product): string
+    {
+        $rows = \Db::getInstance()->executeS('SELECT `id_carrier_reference` FROM `' . _DB_PREFIX_ . 'product_carrier` WHERE `id_product` = ' . (int) $product->id . ' AND `id_shop` = ' . (int) \Context::getContext()->shop->id);
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to read product carriers.');
+        }
+
+        return NativeFields::listFingerprint(array_column($rows, 'id_carrier_reference'));
+    }
+
     /** Store values the import can write, normalized to strings for comparison. */
     private function storeValues(\Product $product, int $idLang): array
     {
@@ -176,6 +273,18 @@ class ProductImporter
             'manufacturer' => (string) (int) $product->id_manufacturer,
             'supplier' => (string) (int) $product->id_supplier,
             'categories' => (int) $product->id_category_default . ':' . implode(',', array_column($categories, 'id_category')),
+            'available_now.' . $idLang => (string) ($product->available_now[$idLang] ?? ''),
+            'available_later.' . $idLang => (string) ($product->available_later[$idLang] ?? ''),
+            'delivery_in_stock.' . $idLang => (string) ($product->delivery_in_stock[$idLang] ?? ''),
+            'delivery_out_stock.' . $idLang => (string) ($product->delivery_out_stock[$idLang] ?? ''),
+            'meta_title.' . $idLang => (string) ($product->meta_title[$idLang] ?? ''),
+            'meta_description.' . $idLang => (string) ($product->meta_description[$idLang] ?? ''),
+            'delivery_time' => (string) (int) $product->additional_delivery_times,
+            'additional_shipping_cost' => ImportedValues::number($product->additional_shipping_cost),
+            'on_sale' => (string) (int) (bool) $product->on_sale,
+            'features' => self::featuresFingerprint((int) $product->id, $idLang),
+            'carriers' => self::carriersFingerprint($product),
+            'related_products' => self::relatedFingerprint((int) $product->id),
         ];
     }
 

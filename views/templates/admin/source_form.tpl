@@ -14,7 +14,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
   <div class="tab-content">
     <div id="pi-general" class="tab-pane active" role="tabpanel" aria-labelledby="pi-general-link"></div>
     <div id="pi-products" class="tab-pane" role="tabpanel" aria-labelledby="pi-products-link">
-<div id="pi-grid-root" data-state="{$pi_state_json|escape:'html':'UTF-8'}">
+<div id="pi-grid-root" data-state="{$pi_state_json|escape:'html':'UTF-8'}" data-carriers="{$pi_carriers_json|escape:'html':'UTF-8'}">
   <div class="pi-grid-toolbar">
     <button type="button" id="pi-refresh-feed" class="btn btn-default">Refresh feed</button>
     <span id="pi-feed-status" role="status" aria-live="polite">Feed not loaded.</span>
@@ -48,6 +48,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
         <tr><td><code>replace(s, search, with)</code></td><td>Replaces plain text, not a pattern: <code>replace(fields['name'], '-', ' ')</code></td></tr>
         <tr><td><code>round(n, decimals)</code></td><td>Rounds half up, decimals default 0: <code>round(num(fields['price']) * 1.22, 2)</code></td></tr>
         <tr><td><code>join(list, sep)</code></td><td>Joins a list, skipping empty entries; separator defaults to <code>', '</code>: <code>join([fields['a'], fields['b']], ' / ')</code></td></tr>
+        <tr><td><code>pairs(list, key, value)</code></td><td>Turns a list of objects into a name → value map, for the <code>features</code> field: <code>pairs(path(fields, 'attributes.item'), '@attributes.name', '@value')</code>. <code>key</code> and <code>value</code> are dot paths like in <code>path()</code>; entries with an empty key are skipped.</td></tr>
         <tr><td><code>count(list)</code></td><td>Number of entries, 0 for a missing list: <code>count(fields['images'])</code></td></tr>
         <tr><td>Quoting</td><td>Write text in single quotes. Put a backslash before a quote inside the text: <code>'it\'s'</code>. Doubling the quote (<code>'it''s'</code>) does not work. A backslash itself is written <code>\\</code>.</td></tr>
       </tbody>
@@ -55,7 +56,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     <p class="help-block">The text helpers return <code>null</code> for <code>null</code>, so a missing field leaves the PrestaShop field empty. <code>round</code> needs a number: wrap text in <code>num()</code>.</p>
   </details>
   <h3 id="pi-product-heading">PrestaShop product fields</h3>
-  <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images expects a list of URLs.</p>
+  <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images, related_products and carriers expect lists; features expects a name → value map.</p>
   <div id="pi-identifier-info" class="pi-identifier-info" role="group" aria-labelledby="pi-identifier-info-label" aria-disabled="true" style="opacity:.65;margin-bottom:12px;padding:8px 10px;background:#f5f5f5;border:1px solid #ddd;border-radius:3px">
     <strong id="pi-identifier-info-label">Identifier (matches products)</strong>
     <span class="help-block" style="display:inline;margin-left:8px">Internal link between this source's feed items and PrestaShop products. It is not written to the product (it shows only as the supplier reference when the source has a supplier). Use the reference field for a visible product code.</span>

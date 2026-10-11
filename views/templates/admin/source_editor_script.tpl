@@ -48,10 +48,22 @@
     ['manufacturer', '', 'Brand name; see the Brands tab.'],
     ['category_paths', 'recommended, list', 'A single category name or a breadcrumb list; see the Categories tab.'],
     ['images', 'recommended, list of URLs', 'List of image URLs.'],
-    ['main_image', '', 'Cover image URL; defaults to the first entry of images.']
+    ['main_image', '', 'Cover image URL; defaults to the first entry of images.'],
+    ['related_products', 'list', 'Other products shown as related: feed IDs of this source or PrestaShop references; list. Replaces the related products unless edited by hand.', {group: 'Relations & features'}],
+    ['features', 'map or list', 'Feature name → value pairs (predefined values, auto-created); map or list.', {hint: "For a list of name/value objects use pairs(list, 'name path', 'value path'), e.g. pairs(path(fields, 'attributes.item'), '@attributes.name', '@value')."}],
+    ['available_now', '', 'Text shown when the product is in stock.', {group: 'Availability & delivery'}],
+    ['available_later', '', 'Text shown when the product is out of stock.'],
+    ['delivery_time', '', 'none, default or custom.', {quick: [['none', "'none'"], ['default', "'default'"], ['custom', "'custom'"]]}],
+    ['delivery_in_stock', '', 'Delivery label shown when the product is in stock.'],
+    ['delivery_out_stock', '', 'Delivery label shown when the product is out of stock.'],
+    ['additional_shipping_cost', '', 'Additional shipping fee for this product.', {group: 'Shipping'}],
+    ['carriers', 'list', 'Carrier names or IDs; empty list = all carriers.', {carriers: true}],
+    ['on_sale', '', 'Show the “On sale!” flag.', {group: 'Merchandising', quick: [['true', 'true'], ['false', 'false']]}],
+    ['meta_title', '', 'SEO title (truncated to 255 characters).', {group: 'SEO'}],
+    ['meta_description', '', 'SEO description (truncated to 512 characters).']
   ];
   // These targets receive the whole list; every other canonical target gets first(<list>).
-  var LIST_TARGETS = ['images', 'category_paths'];
+  var LIST_TARGETS = ['images', 'category_paths', 'related_products', 'features', 'carriers'];
   var VARIANT_TARGETS = [
     ['reference', 'required for variants', 'Combination reference (SKU).'],
     ['ean13', '', 'Combination EAN-13: exactly 13 digits with a valid check digit; invalid values are not written.'],
@@ -59,6 +71,8 @@
     ['price', '', 'Absolute combination price.'],
     ['quantity', '', 'Combination stock.'],
     ['active', '', 'false sets zero stock.'],
+    ['available_now', '', 'Text shown when the combination is in stock.'],
+    ['available_later', '', 'Text shown when the combination is out of stock.'],
     ['image', '', 'Combination image URL.']
   ];
 
@@ -341,6 +355,61 @@
       return {element: wrap, refresh: fill};
     }
 
+    // ---- Quick values and carrier helper for specific targets ----
+    var CARRIERS = [];
+    try { CARRIERS = JSON.parse(root.dataset.carriers || '[]'); } catch (error) { CARRIERS = []; }
+    function cursorInserter(textarea) {
+      var start = textarea.value.length, end = start;
+      function remember() { start = textarea.selectionStart; end = textarea.selectionEnd; }
+      ['select', 'keyup', 'click', 'input', 'blur'].forEach(function (name) { textarea.addEventListener(name, remember); });
+      return function (text) {
+        textarea.focus();
+        textarea.setSelectionRange(start, end);
+        textarea.setRangeText(text, start, end, 'end');
+        remember();
+        textarea.dispatchEvent(new Event('input', {bubbles: true}));
+      };
+    }
+    function addExtras(row, cell, extra) {
+      if (extra.quick) {
+        var quick = document.createElement('select');
+        quick.setAttribute('aria-label', 'Quick value for ' + row.fixedName);
+        quick.add(new Option('Quick value…', ''));
+        extra.quick.forEach(function (entry) { quick.add(new Option(entry[0], entry[1])); });
+        quick.addEventListener('change', function () {
+          if (!quick.value) return;
+          row.select.value = '__formula__';
+          row.textarea.value = quick.value;
+          row.box.style.display = '';
+          row.textarea.dispatchEvent(new Event('input', {bubbles: true}));
+          row.select.dispatchEvent(new Event('change', {bubbles: true}));
+          quick.value = '';
+        });
+        cell.appendChild(document.createTextNode(' '));
+        cell.appendChild(quick);
+      }
+      if (extra.carriers) {
+        var insert = cursorInserter(row.textarea);
+        var picker = document.createElement('select');
+        picker.setAttribute('aria-label', 'Carrier to insert');
+        picker.add(new Option(CARRIERS.length ? 'Shop carriers…' : 'No active carriers', ''));
+        CARRIERS.forEach(function (name) { picker.add(new Option(name, name)); });
+        var one = document.createElement('button');
+        one.type = 'button';
+        one.className = 'btn btn-default btn-sm';
+        one.textContent = '+ Insert carrier name';
+        one.addEventListener('click', function () { if (picker.value) insert(quote(picker.value)); });
+        var list = document.createElement('button');
+        list.type = 'button';
+        list.className = 'btn btn-default btn-sm';
+        list.textContent = 'Insert list';
+        list.addEventListener('click', function () { insert('[' + (picker.value ? quote(picker.value) : '') + ']'); });
+        row.box.appendChild(picker);
+        row.box.appendChild(one);
+        row.box.appendChild(list);
+      }
+    }
+
     // ---- PrestaShop-field-first mapping editor ----
     // cfg: container, heading, targets (fixed rows), options() -> feed field choices, inserts(), addLabel, placeholder, minRows
     function mapEditor(cfg) {
@@ -467,6 +536,12 @@
           help.className = 'pi-target-help';
           help.textContent = spec.description;
           nameCell.appendChild(help);
+          if (spec.extra && spec.extra.hint) {
+            var hint = document.createElement('span');
+            hint.className = 'pi-target-help';
+            hint.textContent = spec.extra.hint;
+            nameCell.appendChild(hint);
+          }
         }
         row.warning = document.createElement('span');
         row.warning.className = 'text-danger';
@@ -502,6 +577,7 @@
         addSampler(row.box, row.textarea, !!cfg.variantRows);
         cell.appendChild(row.box);
         if (cfg.referencePattern && spec.target === 'reference') addPattern(row, cell);
+        if (spec.extra) addExtras(row, cell, spec.extra);
         row.select.addEventListener('change', function () {
           var current = row.select.value;
           row.box.style.display = current === '__formula__' ? '' : 'none';
@@ -528,10 +604,19 @@
         tbody.replaceChildren();
         rows = [];
         var left = state.map(function (entry) { return {target: String(entry.target || ''), expression: String(entry.expression || '')}; });
+        var lastGroup = '';
         (cfg.targets || []).forEach(function (target) {
           var index = left.findIndex(function (entry) { return entry.target.trim() === target[0]; });
           var entry = index === -1 ? null : left.splice(index, 1)[0];
-          addRow({target: target[0], badge: target[1], description: target[2], expression: entry ? entry.expression : '', custom: false});
+          var extra = target[3] || null;
+          if (extra && extra.group && extra.group !== lastGroup) {
+            lastGroup = extra.group;
+            var groupCell = document.createElement('th');
+            groupCell.colSpan = 2;
+            groupCell.textContent = lastGroup;
+            tbody.insertRow().appendChild(groupCell);
+          }
+          addRow({target: target[0], badge: target[1], description: target[2], extra: extra, expression: entry ? entry.expression : '', custom: false});
         });
         left.forEach(function (entry) { addRow({target: entry.target, expression: entry.expression, custom: true}); });
         while (rows.length < (cfg.minRows || 0)) addRow({target: '', expression: '', custom: true});
@@ -894,6 +979,11 @@
         cell.className = 'text-muted';
         cell.textContent = '—';
       } else cell.textContent = entry.value;
+      if (entry.note && !entry.error) {
+        cell.classList.add('text-warning');
+        cell.title = entry.note;
+        cell.appendChild(document.createTextNode(' ⚠ ' + entry.note));
+      }
     }
 
     function renderVariantRow(row, panelId, span) {
@@ -906,7 +996,7 @@
       var table = document.createElement('table');
       table.className = 'table table-condensed pi-variant-table';
       var head = table.createTHead().insertRow();
-      ['Attributes', 'Reference', 'EAN-13', 'MPN', 'Price (impact)', 'Quantity', 'Active', 'Image'].forEach(function (title) {
+      ['Attributes', 'Reference', 'EAN-13', 'MPN', 'Price (impact)', 'Quantity', 'Active', 'Available now', 'Available later', 'Image'].forEach(function (title) {
         var th = document.createElement('th');
         th.scope = 'col';
         th.textContent = title;
@@ -935,7 +1025,7 @@
           var impact = variant.price_impact;
           priceCell.textContent = variant.cells.price.value + ' (' + (impact >= 0 ? '+' : '−') + Math.abs(impact) + ')';
         }
-        ['quantity', 'active'].forEach(function (field) { setCell(vr.insertCell(), variant.cells[field]); });
+        ['quantity', 'active', 'available_now', 'available_later'].forEach(function (field) { setCell(vr.insertCell(), variant.cells[field]); });
         var imageCell = vr.insertCell();
         setCell(imageCell, variant.cells.image);
         if (!variant.cells.image.error && variant.cells.image.value !== null) {
@@ -949,7 +1039,7 @@
       });
       if (row.variants.truncated > 0) {
         var more = tbody.insertRow().insertCell();
-        more.colSpan = 7;
+        more.colSpan = 10;
         more.className = 'text-muted';
         more.textContent = 'and ' + row.variants.truncated + ' more ' + (row.variants.truncated === 1 ? 'variant' : 'variants') + ' (not previewed)';
       }
@@ -993,15 +1083,7 @@
           data.targets.forEach(function (target) {
             var cell = tr.insertCell();
             var entry = (row.cells || {})[target];
-            if (!entry) return;
-            if (entry.error) {
-              cell.className = 'pi-cell-error';
-              cell.title = entry.error;
-              cell.textContent = 'Error: ' + entry.error;
-            } else if (entry.value === null) {
-              cell.className = 'text-muted';
-              cell.textContent = '—';
-            } else cell.textContent = entry.value;
+            if (entry) setCell(cell, entry);
           });
           var variantCell = tr.insertCell();
           var variantRow = null;

@@ -38,4 +38,16 @@ class CatalogOptions
             return ['id_supplier' => (int) $row['id_supplier'], 'label' => $row['name']];
         }, $rows);
     }
+
+    /** Active, non-deleted carriers by name. A carrier is identified across edits by id_reference. */
+    public function carriers(): array
+    {
+        $rows = \Db::getInstance()->executeS('SELECT `id_reference`, `name` FROM `' . _DB_PREFIX_ . 'carrier` WHERE `active` = 1 AND `deleted` = 0 ORDER BY `name`, `id_reference`');
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to list carriers.');
+        }
+        return array_map(static function (array $row): array {
+            return ['id_reference' => (int) $row['id_reference'], 'name' => (string) $row['name']];
+        }, $rows);
+    }
 }

@@ -44,6 +44,13 @@ class ExpressionEvaluatorTest extends TestCase
             ['join([null, ""])', [], ''], ['join(null)', [], null],
             ['count([1, 2, 3])', [], 3], ['count([])', [], 0], ['count(null)', [], 0],
             ['count(path(fields, "missing"))', [], 0],
+            ['pairs(path(fields, "l"), "n", "v")', ['l' => [['n' => 'Color', 'v' => 'Red'], ['n' => 'Size', 'v' => 'L']]], ['Color' => 'Red', 'Size' => 'L']],
+            ['pairs(path(fields, "l"), "n", "v")', ['l' => ['n' => 'Color', 'v' => 'Red']], ['Color' => 'Red']],
+            ['pairs(path(fields, "l"), "n", "v")', [], null],
+            ['pairs(path(fields, "l"), "n", "v")', ['l' => []], []],
+            ['pairs(path(fields, "l"), "a.b", "c.d")', ['l' => [['a' => ['b' => ' K '], 'c' => ['d' => 5]]]], ['K' => 5]],
+            ['pairs(path(fields, "l"), "n", "v")', ['l' => [['n' => '', 'v' => 'x'], ['v' => 'y'], 'junk', ['n' => 'A']]], ['A' => null]],
+            ['pairs(path(fields, "l"), "@attributes.naziv", "@value")', ['l' => [['@attributes' => ['naziv' => 'Dolžina'], '@value' => '2 m']]], ['Dolžina' => '2 m']],
             ['"it\'s" ~ \'it\\\'s\'', [], "it'sit's"],
         ];
     }

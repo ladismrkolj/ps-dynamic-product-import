@@ -26,6 +26,8 @@ class ImportRunner
         private SourceRepository $sourceRepository,
         private ImportRunRepository $runs,
         private ImportCatalog $catalog,
+        private FeatureResolver $features,
+        private CarrierResolver $carriers,
         private ?string $moduleVersion = null
     ) {
     }
@@ -60,6 +62,8 @@ class ImportRunner
                 $this->sourceRepository->setConsecutiveEmptyCount($idSource, 0);
             }
         }
+        /** @var array<int, array{external_id: string, index: int|string, entries: list<string>}> */
+        $pendingRelated = [];
         foreach ($items as $index => $item) {
             $externalId = null;
             try {
@@ -97,9 +101,14 @@ class ImportRunner
                 if ($warning !== null) {
                     $this->log($log, "item $index field reference: $warning");
                 }
-                $idProduct = $this->products->import($idSource, $externalId, $values, $categoryIds, $manufacturer, $idSupplier, (int) $source['id_lang_default']);
+                $idLang = (int) $source['id_lang_default'];
+                [$values, $related] = $this->nativeValues($values, $index, $idLang, $log);
+                $idProduct = $this->products->import($idSource, $externalId, $values, $categoryIds, $manufacturer, $idSupplier, $idLang);
                 // Importers retain their existing signatures; refresh their link with this run ID.
                 $this->productLinks->link($idSource, $externalId, $idProduct, $idRun);
+                if ($related !== null) {
+                    $pendingRelated[$idProduct] = ['external_id' => $externalId, 'index' => $index, 'entries' => $related];
+                }
                 ++$counts[$existing === null ? 'created' : 'updated'];
                 $configuration = $source['variant_mapping'] ?? null;
                 $hasVariants = $configuration && trim($configuration['variants_expression'] ?? '') !== '';
@@ -110,6 +119,11 @@ class ImportRunner
                     try {
                         $fields = $this->variants->mapFields($item, $variant, $configuration['fields']);
                         $attributes = $this->variants->mapAttributes($item, $variant, $configuration['attributes']);
+                        $limited = NativeFields::limitTexts($fields['values'], NativeFields::COMBINATION_TEXT_LIMITS);
+                        $fields['values'] = $limited['values'];
+                        foreach ($limited['warnings'] as $warning) {
+                            $this->log($log, "item $index variant $variantIndex field $warning");
+                        }
                         foreach ($fields['errors'] as $field => $error) {
                             $this->log($log, "item $index variant $variantIndex field $field: $error");
                         }
@@ -133,7 +147,7 @@ class ImportRunner
                             }
                             $ids[] = $this->attributes->resolve((string) $group, $value, true)['id_attribute'];
                         }
-                        $idCombination = $this->combinations->import($idSource, $externalId, (string) $reference, $idProduct, $basePrice, $fields['values'], $ids, $idSupplier);
+                        $idCombination = $this->combinations->import($idSource, $externalId, (string) $reference, $idProduct, $basePrice, $fields['values'], $ids, $idSupplier, $idLang);
                         $this->combinationLinks->link($idSource, $externalId . ':' . $reference, $idCombination, $idProduct, $idRun);
                     } catch (\Throwable $error) {
                         $variantFailed = true;
@@ -153,6 +167,9 @@ class ImportRunner
                     }
                 }
             }
+        }
+        if ($pendingRelated !== []) {
+            $this->importRelated($idSource, $pendingRelated, $counts, $log);
         }
         if (!$skipCleanup && !empty($source['deactivate_missing'])) {
             try {
@@ -205,6 +222,110 @@ class ImportRunner
             }
         }
         return $results;
+    }
+
+    /**
+     * Normalises the native-field values of one item and resolves features and carriers. Related products come back
+     * separately: they are resolved in a second pass, once every product of the run exists.
+     *
+     * @return array{0: array<string, mixed>, 1: list<string>|null}
+     */
+    private function nativeValues(array $values, int|string $index, int $idLang, string &$log): array
+    {
+        $limited = NativeFields::limitTexts($values, NativeFields::PRODUCT_TEXT_LIMITS);
+        $values = $limited['values'];
+        foreach ($limited['warnings'] as $warning) {
+            $this->log($log, "item $index field $warning");
+        }
+        try {
+            $deliveryTime = NativeFields::deliveryTime($values['delivery_time'] ?? null);
+        } catch (\InvalidArgumentException $error) {
+            $deliveryTime = null;
+            $this->log($log, "item $index field delivery_time: " . $error->getMessage());
+        }
+        unset($values['delivery_time']);
+        if ($deliveryTime !== null) {
+            $values['delivery_time'] = $deliveryTime;
+        }
+        if (isset($values['additional_shipping_cost']) && (!is_numeric($values['additional_shipping_cost']) || (float) $values['additional_shipping_cost'] < 0)) {
+            unset($values['additional_shipping_cost']);
+            $this->log($log, "item $index field additional_shipping_cost: expected a number of at least 0");
+        }
+        $features = $values['features'] ?? null;
+        $carriers = $values['carriers'] ?? null;
+        $relatedInput = $values['related_products'] ?? null;
+        unset($values['features'], $values['carriers'], $values['related_products']);
+        if ($features !== null) {
+            try {
+                $normalized = NativeFields::features($features);
+                foreach ($normalized['warnings'] as $warning) {
+                    $this->log($log, "item $index field features: $warning");
+                }
+                $rows = [];
+                foreach ($normalized['pairs'] as $name => $value) {
+                    try {
+                        $rows[] = $this->features->resolve((string) $name, $value, $idLang);
+                    } catch (\InvalidArgumentException $error) {
+                        $this->log($log, "item $index field features: \"$name\": " . $error->getMessage() . ', skipped');
+                    }
+                }
+                $values['features'] = $rows;
+            } catch (\InvalidArgumentException $error) {
+                $this->log($log, "item $index field features: " . $error->getMessage());
+            }
+        }
+        if ($carriers !== null) {
+            $resolved = $this->carriers->resolve($carriers);
+            foreach ($resolved['unknown'] as $entry) {
+                $this->log($log, "item $index field carriers: \"$entry\" not found");
+            }
+            // An empty list means all carriers; a list with nothing but unknown carriers must not widen delivery.
+            if ($resolved['ids'] !== [] || $resolved['unknown'] === []) {
+                $values['carriers'] = $resolved['ids'];
+            }
+        }
+
+        return [$values, $relatedInput === null ? null : NativeFields::stringList($relatedInput)];
+    }
+
+    /**
+     * Second pass: every product of the run exists now. Entries match a feed identifier of this source first, then a
+     * product reference. Errors are per product.
+     *
+     * @param array<int, array{external_id: string, index: int|string, entries: list<string>}> $pending
+     */
+    private function importRelated(int $idSource, array $pending, array &$counts, string &$log): void
+    {
+        $byFeedId = [];
+        $byReference = [];
+        $feedLookup = function (string $entry) use ($idSource, &$byFeedId): ?int {
+            if (!array_key_exists($entry, $byFeedId)) {
+                $id = $this->productLinks->findProductId($idSource, $entry);
+                $byFeedId[$entry] = $id !== null && $this->productLinks->productExists($id) ? $id : null;
+            }
+            return $byFeedId[$entry];
+        };
+        $referenceLookup = function (string $entry) use (&$byReference): ?int {
+            if (!array_key_exists($entry, $byReference)) {
+                $byReference[$entry] = $this->catalog->productIdByReference($entry);
+            }
+            return $byReference[$entry];
+        };
+        foreach ($pending as $idProduct => $row) {
+            try {
+                $resolved = RelatedProductsResolver::resolve($row['entries'], $idProduct, $feedLookup, $referenceLookup);
+                foreach ($resolved['missing'] as $entry) {
+                    $this->log($log, "item {$row['index']} field related_products: \"$entry\" not found");
+                }
+                // An empty list clears the related products; a list with nothing found must not.
+                if ($resolved['ids'] !== [] || $row['entries'] === []) {
+                    $this->products->importRelated($idSource, $row['external_id'], $idProduct, $resolved['ids']);
+                }
+            } catch (\Throwable $error) {
+                ++$counts['failed'];
+                $this->log($log, "item {$row['index']} field related_products: " . $error->getMessage());
+            }
+        }
     }
 
     /**

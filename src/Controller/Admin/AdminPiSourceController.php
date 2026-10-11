@@ -273,9 +273,10 @@ class AdminPiSourceController extends ModuleAdminController
                 'root_category_id' => $saved['root_category_id'] ?? null,
                 'default_id_category' => $saved['default_id_category'] ?? null,
                 'default_id_manufacturer' => $saved['default_id_manufacturer'] ?? null,
+                'identifier_field' => $_POST['identifier_field'] ?? ($saved['identifier_field'] ?? ''),
                 'field_mapping' => $mapping,
                 'variant_mapping' => $variantMapping,
-            ], $feed['items'], \ProductImport\Service\PreviewBuilder::TABLE_LIMIT, $this->referenceOwner((int) $idSource, $saved ?? []));
+            ], $feed['items'], \ProductImport\Service\PreviewBuilder::TABLE_LIMIT, $this->referenceOwner((int) $idSource, $saved ?? []), (new \ProductImport\Service\CatalogOptions())->carriers());
             $result['item_count'] = count($feed['items']);
             $result['cache'] = $this->cacheInfo($feed);
         } catch (Throwable $error) {
@@ -801,6 +802,7 @@ class AdminPiSourceController extends ModuleAdminController
             'fields' => $variant['field_rows'] ?? $variantFields,
         ];
         $this->context->smarty->assign('pi_state_json', json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '{}');
+        $this->context->smarty->assign('pi_carriers_json', json_encode(array_column((new \ProductImport\Service\CatalogOptions())->carriers(), 'name'), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE) ?: '[]');
         $this->context->smarty->assign(['pi_can_discover' => $this->access('edit'), 'pi_preview_id' => $id, 'pi_preview_url' => $this->context->link->getAdminLink('AdminPiSource'), 'pi_run_log_url' => $this->context->link->getAdminLink('AdminPiRunLog'), 'pi_run_name' => $source['name'], 'pi_run_baseline' => (new \ProductImport\Repository\ImportRunRepository())->maxId(), 'pi_run_deactivate' => $source['deactivate_missing'], 'pi_can_run' => $this->access('edit')]);
         $testHtml = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/preview.tpl');
         $mappingHtml = $this->context->smarty->fetch(dirname(__DIR__, 3) . '/views/templates/admin/source_form.tpl');

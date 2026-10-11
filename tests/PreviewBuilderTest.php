@@ -126,6 +126,52 @@ class PreviewBuilderTest extends TestCase
         self::assertNull($row[1]['variants']['items'][0]['price_impact']);
     }
 
+    public function testTableShowsListsFeaturesAndValidatesDeliveryCarriersRelatedAndMeta(): void
+    {
+        $source = $this->withDefaults(['identifier_field' => 'id', 'field_mapping' => [
+            'name' => 'fields["name"]',
+            'related_products' => 'fields["related"]',
+            'features' => 'fields["features"]',
+            'delivery_time' => 'fields["delivery"]',
+            'carriers' => 'fields["carriers"]',
+            'meta_title' => 'fields["meta"]',
+            'on_sale' => 'true',
+        ]]);
+        $items = [
+            ['id' => 'A', 'name' => 'One', 'related' => ['B', 'A', 'REF-1', 'GHOST'], 'features' => ['Color' => 'Red', 'Empty' => '', 'Size' => 'L'], 'delivery' => 'custom', 'carriers' => ['DPD', 'Nope', '7', '9'], 'meta' => str_repeat('x', 300)],
+            ['id' => 'B', 'name' => 'Two', 'related' => 'A', 'features' => [['name' => 'Material', 'value' => 'Wood']], 'delivery' => 'soon', 'carriers' => [], 'meta' => 'short'],
+        ];
+        $owner = static fn (string $reference, array $item): ?int => $reference === 'REF-1' ? 5 : null;
+        $carriers = [['id_reference' => 7, 'name' => 'DPD'], ['id_reference' => 8, 'name' => 'Pošta']];
+        $rows = $this->builder()->table($source, $items, 20, $owner, $carriers)['rows'];
+        $first = $rows[0]['cells'];
+        self::assertSame('B, A, REF-1, GHOST', $first['related_products']['value']);
+        self::assertNull($first['related_products']['error']);
+        self::assertSame('not found yet (resolved after import): GHOST', $first['related_products']['note']);
+        self::assertSame('Color: Red; Size: L', $first['features']['value']);
+        self::assertNull($first['delivery_time']['error']);
+        self::assertSame('"Nope", "9"', substr($first['carriers']['error'], strlen('unknown carrier: ')));
+        self::assertStringContainsString('300 characters; truncated to 255', $first['meta_title']['note']);
+        self::assertSame('true', $first['on_sale']['value']);
+        $second = $rows[1]['cells'];
+        self::assertNull($second['related_products']['note']);
+        self::assertSame('Material: Wood', $second['features']['value']);
+        self::assertSame('delivery_time must be none, default or custom', $second['delivery_time']['error']);
+        self::assertNull($second['carriers']['error']);
+        self::assertNull($second['meta_title']['note']);
+    }
+
+    public function testTableVariantCellsIncludeAvailabilityTexts(): void
+    {
+        $source = $this->withDefaults(['field_mapping' => ['name' => 'fields["name"]'],
+            'variant_mapping' => ['variants_expression' => 'path(fields, "variants")', 'attributes' => [['name' => 'Size', 'expression' => 'path(variant, "size")']],
+                'fields' => ['reference' => 'path(variant, "sku")', 'available_now' => '"In stock"', 'available_later' => 'path(variant, "later")']]]);
+        $row = $this->builder()->table($source, [['name' => 'Suit', 'variants' => [['sku' => 'S', 'size' => 'S', 'later' => 'Soon']]]])['rows'][0];
+        $cells = $row['variants']['items'][0]['cells'];
+        self::assertSame('In stock', $cells['available_now']['value']);
+        self::assertSame('Soon', $cells['available_later']['value']);
+    }
+
     public function testAssemblesFieldsAndReadOnlyResolutions(): void
     {
         $result = $this->build(['field_mapping' => ['name' => 'fields["name"]', 'category_paths' => '[" Boards "]', 'manufacturer' => '"Acme"']], ['name' => 'Board']);

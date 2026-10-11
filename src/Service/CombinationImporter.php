@@ -23,7 +23,8 @@ class CombinationImporter
         float $baseProductPrice,
         array $mappedFields,
         array $attributeIds,
-        ?int $idSupplier = null
+        ?int $idSupplier,
+        int $idLangDefault
     ): int {
         // Identity is parentExternalId:variantExternalId, scoped by id_source.
         $externalId = $parentExternalId . ':' . $variantExternalId;
@@ -45,7 +46,7 @@ class CombinationImporter
         }
         // Fields whose store value differs from what the import last wrote were edited manually: keep them.
         $imported = $link['imported_values'] ?? [];
-        $current = $id === null || $imported === [] ? [] : ImportedValues::fingerprint(self::storeValues($combination));
+        $current = $id === null || $imported === [] ? [] : ImportedValues::fingerprint(self::storeValues($combination, $idLangDefault));
         $written = [];
         $combination->id_product = $idProduct;
         if (isset($mappedFields['mpn']) && !\Validate::isMpn((string) $mappedFields['mpn'])) {
@@ -62,14 +63,29 @@ class CombinationImporter
             $combination->price = round((float) $mappedFields['price'] - $baseProductPrice, 6);
             $written[] = 'price';
         }
+        foreach (['available_now', 'available_later'] as $field) {
+            if (isset($mappedFields[$field]) && ImportedValues::writable($imported, $current, $field . '.' . $idLangDefault)) {
+                $translations = is_array($combination->$field) ? $combination->$field : [];
+                $translations[$idLangDefault] = (string) $mappedFields[$field];
+                $combination->$field = $translations;
+                $written[] = $field . '.' . $idLangDefault;
+            }
+        }
         $defaultId = (int) \Db::getInstance()->getValue(
             'SELECT `id_product_attribute` FROM `' . _DB_PREFIX_ . 'product_attribute_shop` WHERE `id_product` = ' . (int) $idProduct
             . ' AND `id_shop` = ' . (int) \Context::getContext()->shop->id . ' AND `default_on` = 1'
         );
         // Preserve an existing default; the first imported combination becomes default.
         $combination->default_on = !$defaultId || $defaultId === (int) $combination->id ? 1 : null;
-        if (!$combination->save() || !$combination->setAttributes(array_values(array_unique(array_map('intval', $attributeIds))))) {
-            throw new \RuntimeException('Unable to save combination or its attributes.');
+        if (!$combination->save()) {
+            throw new \RuntimeException('Unable to save combination.');
+        }
+        if ($id === null) {
+            // Link at once: a failure further down must not leave an orphan that the next run duplicates.
+            $this->combinations->link($idSource, $externalId, (int) $combination->id, $idProduct, null, null);
+        }
+        if (!$combination->setAttributes(array_values(array_unique(array_map('intval', $attributeIds))))) {
+            throw new \RuntimeException('Unable to save combination attributes.');
         }
         if ($idSupplier !== null) {
             // The variant's feed reference becomes the supplier reference of this combination.
@@ -93,20 +109,22 @@ class CombinationImporter
                 \PrestaShopLogger::addLog('Combination image skipped: ' . $error->getMessage(), 2, null, 'Product', $idProduct);
             }
         }
-        $imported = array_intersect_key(ImportedValues::fingerprint(self::storeValues($combination)), array_flip($written)) + $imported;
+        $imported = array_intersect_key(ImportedValues::fingerprint(self::storeValues($combination, $idLangDefault)), array_flip($written)) + $imported;
         $this->combinations->link($idSource, $externalId, (int) $combination->id, $idProduct, null, $imported);
 
         return (int) $combination->id;
     }
 
     /** Store values the import can write, normalized to strings for comparison. */
-    private static function storeValues(\Combination $combination): array
+    private static function storeValues(\Combination $combination, int $idLang): array
     {
         return [
             'reference' => (string) $combination->reference,
             'ean13' => (string) $combination->ean13,
             'mpn' => (string) $combination->mpn,
             'price' => ImportedValues::number($combination->price),
+            'available_now.' . $idLang => (string) ($combination->available_now[$idLang] ?? ''),
+            'available_later.' . $idLang => (string) ($combination->available_later[$idLang] ?? ''),
         ];
     }
 }

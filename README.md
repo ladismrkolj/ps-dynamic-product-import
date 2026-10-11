@@ -35,7 +35,7 @@ Feeds must be a top-level array of items, with no redirect following. Only HTTP(
 
 ## Field mapping
 
-Every field has one Feed field select, or a formula. Selecting a feed field generates its canonical expression: `fields['name']` for a top-level key, `path(fields, 'a.b')` for a nested path, bracket form for keys containing dots. A list mapped to a single-value field becomes `first(fields['images'])`. `images` and `category_paths` receive the whole list. A saved expression that matches a feed field's canonical form reopens with that field selected, and anything else reopens as Formula. **Insert feed field at cursor** and **Sample values** help with formulas. **+ Add custom PrestaShop field** adds extra targets. The target list is not an enforced allowlist.
+Every field has one Feed field select, or a formula. Selecting a feed field generates its canonical expression: `fields['name']` for a top-level key, `path(fields, 'a.b')` for a nested path, bracket form for keys containing dots. A list mapped to a single-value field becomes `first(fields['images'])`. `images`, `category_paths`, `related_products`, `features` and `carriers` receive the whole list. A saved expression that matches a feed field's canonical form reopens with that field selected, and anything else reopens as Formula. **Insert feed field at cursor** and **Sample values** help with formulas. **+ Add custom PrestaShop field** adds extra targets. The target list is not an enforced allowlist.
 
 | Target | Meaning |
 |---|---|
@@ -55,6 +55,17 @@ Every field has one Feed field select, or a formula. Selecting a feed field gene
 | `category_paths` | A single name, a single path (strings or `{title: …}` dicts) or a list of paths, for example `[path(fields, 'breadcrumbs')]`. Hierarchy matters only for auto-created categories. |
 | `images` | List of URLs. Null and empty entries are dropped. |
 | `main_image` | Tried first. If absent, the first image is used. It can stand alone. |
+| `related_products` | List of strings (or one string). Each entry is matched first as a feed identifier of the same source, then as a PrestaShop product reference (any product). Resolved in a second pass at the end of each run, after every product exists, so a related product created in the same run works. Replaces the product's related products (accessories) unless they were edited by hand. Unmatched entries are logged as `item N field related_products: "X" not found`. A product never relates to itself. The preview notes entries that are not found yet; they may still be created by the import. |
+| `features` | Map `{feature name: value}` or a list of `{name, value}`. Predefined feature values, shared across products. Features and values are matched by exact name in the source language and auto-created when missing. Replaces the product's features unless edited by hand. Empty or null values are skipped, and names or values over PrestaShop's length limits are skipped with a log line. Use `pairs(list, keyPath, valuePath)` to turn a list of objects into a map. |
+| `available_now`, `available_later` | Text shown when the product is in stock / out of stock (source language). Also combination fields. |
+| `delivery_time` | `'none'`, `'default'` or `'custom'` (0, 1 and 2 also work); stored in `additional_delivery_times`. When `delivery_in_stock` or `delivery_out_stock` is mapped without `delivery_time`, `'custom'` is used. The editor has a quick-value select. An invalid value is flagged in the preview. |
+| `delivery_in_stock`, `delivery_out_stock` | Delivery labels shown in stock / out of stock (source language). |
+| `additional_shipping_cost` | Number, parsed like `price`. |
+| `carriers` | List of carrier names or numeric carrier IDs (`id_reference`), or one string. Names are matched exactly against active, non-deleted carriers; unknown names are logged and skipped. An empty list means all carriers. Replaces the product's carriers unless edited by hand. The editor lists the shop's carriers next to the formula; the preview flags unknown ones. |
+| `on_sale` | Boolean, the "On sale!" flag. |
+| `meta_title`, `meta_description` | SEO texts (source language). Over-long text is truncated to PrestaShop's limits (255 and 512 characters) with a warning in the log; the preview flags it. |
+
+The new fields above follow the same manual-edit protection as the other fields (see "Keeping manual edits").
 
 The **supplier** is set on the General tab. It tags every product of the source and needs suppliers to exist (Catalog > Brands & Suppliers). Each imported product also gets a supplier association with the feed identifier as its supplier reference (see "Identity"). Clearing it leaves existing suppliers untouched. Other General settings: root category (default `PS_ROOT_CATEGORY`), source language (`id_lang_default`, default 1) and `deactivate_missing`.
 
@@ -117,6 +128,7 @@ Formula syntax (the same table is in the **Formula syntax** toggle at the top of
 | `replace(s, search, with)` | Replaces plain text, not a pattern: `replace(fields['name'], '-', ' ')` |
 | `round(n, decimals)` | Rounds half up, decimals default 0: `round(num(fields['price']) * 1.22, 2)` |
 | `join(list, sep)` | Joins a list, skipping empty entries; separator defaults to `', '`: `join([fields['a'], fields['b']], ' / ')` |
+| `pairs(list, keyPath, valuePath)` | Turns a list of objects into a `{key: value}` map; both paths are dot paths like `path()`. A single object counts as a one-entry list, `null` gives `null`, and entries with an empty key are skipped: `pairs(path(fields, 'dodatneLastnosti.lastnost'), '@attributes.naziv', '@value')` |
 | `count(list)` | Number of entries, 0 for a missing list: `count(fields['images'])` |
 | Quoting | Write text in single quotes. Put a backslash before a quote inside the text: `'it\'s'`. Doubling the quote (`'it''s'`) does not work. A backslash itself is written `\\`. |
 
@@ -144,6 +156,11 @@ Choose **Format: XML**. The **XML item path** is the slash-separated path from i
 - **Several optional fields as one list.** Write `[fields['main'], path(fields, 'extra1'), path(fields, 'extra2')]`. Null entries are dropped from `images`.
 - **Booleans.** Write `true` and `false` in lowercase.
 - **Discount pairs.** Apply the identical markup to `price` and `regular_price` (for example `* 1.5` on both), or the discount comparison breaks.
+- **Features from name/value objects.** `pairs(path(fields, 'dodatneLastnosti.lastnost'), '@attributes.naziv', '@value')` maps `[{'@attributes': {'naziv': 'Barva'}, '@value': 'rdeča'}, …]` to `{'Barva': 'rdeča'}`.
+- **Delivery labels from days.** `delivery_in_stock`: `fields['stock_availability_time_days'] !== null ? 'Dobava v ' ~ fields['stock_availability_time_days'] ~ ' dneh' : null` (a `null` leaves the label empty). Add `delivery_time` = `'custom'`, or leave it unmapped.
+- **Carriers as a list.** `['DPD', 'Pošta Slovenije']`, or one string for a single carrier. `[]` means all carriers. Names must match the shop's carriers exactly; the editor's carrier select inserts them for you.
+- **on_sale from a regular price.** `fields['regular_price'] !== null` flags every item that carries a regular price; for a real discount use `num(fields['regular_price']) > num(fields['price'])`.
+- **Meta title.** `fields['name'] ~ ' | ' ~ fields['brand']`. A missing brand leaves a trailing ` | `, so use `join([fields['name'], fields['brand']], ' | ')` when the brand is optional (`join` skips empty entries).
 
 #### Recharge (XML)
 
@@ -161,6 +178,7 @@ Format XML, item path `izdelki/izdelek` (offered as the first detected path), id
 | `active` | `fields['dobava']['@attributes']['id'] == '1'` |
 | `quantity` | `fields['dobava']['@attributes']['id'] == '1' ? 5 : 0` (the feed has no real counts) |
 | `images` | `[fields['slikaVelika'], path(fields, 'dodatnaSlika1'), …, path(fields, 'dodatnaSlika10')]` |
+| `features` | `pairs(path(fields, 'dodatneLastnosti.lastnost'), '@attributes.naziv', '@value')` |
 
 #### JSON (easy-surfshop-style)
 

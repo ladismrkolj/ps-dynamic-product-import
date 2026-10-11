@@ -7,7 +7,7 @@ use ProductImport\Repository\ExternalProductRepository;
 use ProductImport\Repository\ExternalCombinationRepository;
 use ProductImport\Repository\ImportRunRepository;
 use ProductImport\Repository\SourceRepository;
-use ProductImport\Service\{ProductFilter, ProductFieldMapper, CategoryPathNormalizer, CategoryResolver, ManufacturerResolver, ProductImporter, VariantFieldMapper, AttributeResolver, CombinationImporter, ImportCatalog, ImportRunner, ExpressionEvaluator, ImportedValues};
+use ProductImport\Service\{ProductFilter, ProductFieldMapper, CategoryPathNormalizer, CategoryResolver, ManufacturerResolver, ProductImporter, VariantFieldMapper, AttributeResolver, CombinationImporter, ImportCatalog, ImportRunner, ExpressionEvaluator, ImportedValues, FeatureResolver, CarrierResolver};
 
 class ImportRunnerTest extends TestCase
 {
@@ -16,7 +16,7 @@ class ImportRunnerTest extends TestCase
         $state = $sharedState ?? (object) ['products' => ['old' => ['external_id' => 'old', 'id_product' => 10, 'id_run_last_seen' => null], 'stale' => ['external_id' => 'stale', 'id_product' => 11, 'id_run_last_seen' => 1]],
             'combinations' => ['old:stale' => ['id_product' => 10, 'id_product_attribute' => 50, 'id_run_last_seen' => null]],
             'triggers' => [], 'deactivated' => [], 'zeroed' => [], 'finished' => [], 'prices' => [], 'staleCalls' => 0, 'emptyStreakUpdates' => [],
-            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => []];
+            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => [], 'related' => [], 'featureCalls' => [], 'relatedFails' => []];
         $fetcher = static function (array $source) use ($items, $fetchFails): array {
             if ($fetchFails) {
                 throw new \RuntimeException('fetch failed');
@@ -119,10 +119,23 @@ class ImportRunnerTest extends TestCase
                 if ($external === 'broken') {
                     throw new \RuntimeException('save failed');
                 }
+                if ($external === 'orphan' && !isset($this->state->products['orphan'])) {
+                    // Like the real importer: the link is written right after the first save, then a later step fails.
+                    $this->state->products['orphan'] = ['external_id' => 'orphan', 'id_product' => 13, 'id_run_last_seen' => null];
+                    throw new \RuntimeException('step after save failed');
+                }
                 TestCase::assertSame([3], $categories);
                 TestCase::assertSame(4, $manufacturer);
                 TestCase::assertNull($supplier);
                 return $external === 'old' ? 10 : 12;
+            }
+            public function importRelated(int $source, string $external, int $product, array $relatedIds): bool
+            {
+                if (in_array($external, $this->state->relatedFails, true)) {
+                    throw new \RuntimeException('related failed');
+                }
+                $this->state->related[$external] = [$product, $relatedIds];
+                return true;
             }
         };
         $categories = new class () extends CategoryResolver {
@@ -157,7 +170,7 @@ class ImportRunnerTest extends TestCase
             public function __construct(private object $state)
             {
             }
-            public function import(int $source, string $parent, string $variant, int $product, float $price, array $fields, array $ids, ?int $idSupplier = null): int
+            public function import(int $source, string $parent, string $variant, int $product, float $price, array $fields, array $ids, ?int $idSupplier, int $idLang): int
             {
                 $this->state->prices[] = $price;
                 $this->state->variantFields[] = $fields;
@@ -195,8 +208,30 @@ class ImportRunnerTest extends TestCase
                 $this->state->zeroed[] = [$idProduct, $idCombination];
             }
         };
+        $features = new class ($state) extends FeatureResolver {
+            public function __construct(private object $state)
+            {
+            }
+            public function resolve(string $name, string $value, int $idLang): array
+            {
+                if ($value === 'bad<value>') {
+                    throw new \InvalidArgumentException('feature value contains characters PrestaShop rejects (<>={})');
+                }
+                $this->state->featureCalls[] = [$name, $value, $idLang];
+                return ['id_feature' => count($this->state->featureCalls), 'id_feature_value' => 100 + count($this->state->featureCalls)];
+            }
+        };
+        $carriers = new class () extends CarrierResolver {
+            public function __construct()
+            {
+            }
+            public function resolve(mixed $input): array
+            {
+                return CarrierResolver::match(\ProductImport\Service\NativeFields::stringList($input), [['id_reference' => 7, 'name' => 'DPD'], ['id_reference' => 9, 'name' => 'GLS']]);
+            }
+        };
         $evaluator = new ExpressionEvaluator();
-        $runner = new ImportRunner($fetcher, new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, $products, new VariantFieldMapper($evaluator), $attributes, $combinations, $links, $combinationLinks, $sources, $runs, $catalog, '1.0.0');
+        $runner = new ImportRunner($fetcher, new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, $products, new VariantFieldMapper($evaluator), $attributes, $combinations, $links, $combinationLinks, $sources, $runs, $catalog, $features, $carriers, '1.0.0');
         return [$runner, $state];
     }
 
@@ -460,5 +495,95 @@ class ImportRunnerTest extends TestCase
         self::assertSame('SKU-2', $state->importValues['old']['reference']);
         self::assertStringContainsString('item 0 field reference: "SKU-1" is already used by product #99 — not written', $result['error_log']);
         self::assertSame(1, substr_count($result['error_log'], 'field reference'));
+    }
+
+    private function nativeSource(array $mapping): array
+    {
+        return $this->source(['field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]'] + $mapping]);
+    }
+
+    public function testNativeFieldsAreNormalisedAndResolved(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'props' => [['n' => 'Color', 'v' => 'Red'], ['n' => 'Empty', 'v' => ''], ['n' => 'Bad', 'v' => 'bad<value>']], 'title' => str_repeat('é', 300)]]);
+        $result = $runner->runOne($this->nativeSource([
+            'features' => 'pairs(path(fields, "props"), "n", "v")',
+            'carriers' => '["DPD", "nope", "9"]',
+            'delivery_time' => '"Custom"',
+            'meta_title' => 'fields["title"]',
+            'additional_shipping_cost' => '-1',
+        ]), 'admin-manual');
+        $values = $state->importValues['new'];
+        self::assertSame([['id_feature' => 1, 'id_feature_value' => 101]], $values['features']);
+        self::assertSame([['Color', 'Red', 1]], $state->featureCalls);
+        self::assertSame([7, 9], $values['carriers']);
+        self::assertSame(2, $values['delivery_time']);
+        self::assertSame(255, mb_strlen($values['meta_title']));
+        self::assertArrayNotHasKey('additional_shipping_cost', $values);
+        self::assertStringContainsString('item 0 field carriers: "nope" not found', $result['error_log']);
+        self::assertStringContainsString('item 0 field meta_title: truncated to 255 characters', $result['error_log']);
+        self::assertStringContainsString('item 0 field features: "Bad": feature value contains characters PrestaShop rejects', $result['error_log']);
+        self::assertStringContainsString('item 0 field additional_shipping_cost: expected a number of at least 0', $result['error_log']);
+    }
+
+    public function testCarriersOnlyUnknownAreNotWrittenButEmptyListMeansAll(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new']]);
+        $runner->runOne($this->nativeSource(['carriers' => '["nope"]']), 'admin-manual');
+        self::assertArrayNotHasKey('carriers', $state->importValues['new']);
+        [$runner, $state] = $this->fixture([['id' => 'new']]);
+        $runner->runOne($this->nativeSource(['carriers' => '[]']), 'admin-manual');
+        self::assertSame([], $state->importValues['new']['carriers']);
+    }
+
+    public function testInvalidDeliveryTimeIsLoggedAndDropped(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new']]);
+        $result = $runner->runOne($this->nativeSource(['delivery_time' => '"soon"']), 'admin-manual');
+        self::assertArrayNotHasKey('delivery_time', $state->importValues['new']);
+        self::assertStringContainsString('item 0 field delivery_time: delivery_time must be', $result['error_log']);
+    }
+
+    public function testRelatedProductsResolveAfterTheLoopFeedIdBeforeReferenceAndSelfExcluded(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'rel' => ['old', 'SKU-9', 'ghost', 'new', 'dup']]]);
+        $state->references = ['SKU-9' => 77, 'old' => 99, 'dup' => 12];
+        $result = $runner->runOne($this->nativeSource(['related_products' => 'fields["rel"]']), 'admin-manual');
+        self::assertArrayNotHasKey('related_products', $state->importValues['new']);
+        // 'old' is a feed ID (10), not the reference owner 99; 'new' and the reference of product 12 are the product itself.
+        self::assertSame(['new' => [12, [10, 77]]], $state->related);
+        self::assertStringContainsString('item 0 field related_products: "ghost" not found', $result['error_log']);
+        self::assertSame(1, substr_count($result['error_log'], 'not found'));
+    }
+
+    public function testRelatedWithNothingFoundIsNotAppliedButEmptyListClears(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'rel' => ['ghost']]]);
+        $runner->runOne($this->nativeSource(['related_products' => 'fields["rel"]']), 'admin-manual');
+        self::assertSame([], $state->related);
+        [$runner, $state] = $this->fixture([['id' => 'new', 'rel' => []]]);
+        $runner->runOne($this->nativeSource(['related_products' => 'fields["rel"]']), 'admin-manual');
+        self::assertSame(['new' => [12, []]], $state->related);
+    }
+
+    public function testRelatedErrorIsPerProductAndRunCompletes(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'rel' => ['old']], ['id' => 'old', 'rel' => ['new']]]);
+        $state->relatedFails = ['new'];
+        $result = $runner->runOne($this->nativeSource(['related_products' => 'fields["rel"]']), 'admin-manual');
+        self::assertSame(1, $result['counts']['failed']);
+        self::assertSame('completed_with_errors', $result['status']);
+        self::assertSame(['old' => [10, [12]]], $state->related);
+        self::assertStringContainsString('item 0 field related_products: related failed', $result['error_log']);
+    }
+
+    public function testFailureAfterFirstSaveLeavesLinkSoNextRunUpdatesInsteadOfDuplicating(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'orphan']]);
+        $first = $runner->runOne($this->source(), 'admin-manual');
+        self::assertSame(['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'failed' => 1], $first['counts']);
+        self::assertSame(13, $state->products['orphan']['id_product']);
+        self::assertNull($state->products['orphan']['feed_hash'] ?? null);
+        $second = $runner->runOne($this->source(), 'admin-manual');
+        self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0], $second['counts']);
     }
 }

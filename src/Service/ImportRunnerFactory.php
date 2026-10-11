@@ -31,7 +31,9 @@ class ImportRunnerFactory
             $combinations,
             new SourceRepository(),
             new ImportRunRepository(),
-            new ImportCatalog()
+            new ImportCatalog(),
+            new FeatureResolver(),
+            new CarrierResolver()
         );
     }
 }

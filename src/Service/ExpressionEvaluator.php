@@ -11,7 +11,7 @@ class ExpressionEvaluator
     public function __construct()
     {
         $this->language = new ExpressionLanguage();
-        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count'] as $name) {
+        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs'] as $name) {
             $this->language->register(
                 $name,
                 static function (...$arguments) use ($name) {
@@ -180,6 +180,34 @@ class ExpressionEvaluator
         }
 
         return count($list);
+    }
+
+    /** Turns a list of objects into a {key: value} map; a single object counts as a one-entry list. */
+    public static function pairs($list, $keyPath, $valuePath): ?array
+    {
+        if ($list === null) {
+            return null;
+        }
+        if (!is_array($list)) {
+            throw new \InvalidArgumentException('pairs() expects a list of objects.');
+        }
+        if (!is_string($keyPath) || !is_string($valuePath)) {
+            throw new \InvalidArgumentException('pairs() expects text paths for the key and the value.');
+        }
+        $entries = array_is_list($list) ? $list : [$list];
+        $map = [];
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $key = self::path($entry, $keyPath);
+            if (!is_scalar($key) || trim((string) $key) === '') {
+                continue;
+            }
+            $map[trim((string) $key)] = self::path($entry, $valuePath);
+        }
+
+        return $map;
     }
 
     private static function text(string $function, $value): ?string
