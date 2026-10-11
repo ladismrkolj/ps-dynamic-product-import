@@ -130,7 +130,7 @@ class ImportRunner
                 $configuration = $source['variant_mapping'] ?? null;
                 $hasVariants = $configuration && trim($configuration['variants_expression'] ?? '') !== '';
                 $variants = $hasVariants ? $this->variants->variants($item, $configuration['variants_expression']) : [];
-                $basePrice = $hasVariants ? (isset($values['price']) ? (float) $values['price'] : $this->catalog->savedPrice($idProduct)) : 0.0;
+                $basePrice = $hasVariants ? $this->catalog->variantBasePrice($idProduct) : 0.0;
                 $variantFailed = false;
                 foreach ($variants as $variantIndex => $variant) {
                     try {

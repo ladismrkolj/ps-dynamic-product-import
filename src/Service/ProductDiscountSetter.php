@@ -4,7 +4,32 @@ namespace ProductImport\Service;
 
 class ProductDiscountSetter
 {
-    public function apply(int $idProduct, ?float $regularPrice, ?float $currentPrice): void
+    /**
+     * Pure rule: the price PrestaShop adds a combination impact to. With the module's always-on discount it is the
+     * product price minus the discount reduction (the sale price); without one, the product price itself.
+     */
+    public static function impactBase(float $productPrice, ?float $discountReduction): float
+    {
+        return round($discountReduction === null ? $productPrice : $productPrice - $discountReduction, 6);
+    }
+
+    /** Reduction of the module's always-on product discount as it stands in the store, or null when there is none. */
+    public function activeReduction(int $idProduct): ?float
+    {
+        $rows = $this->discountRows($idProduct);
+        if ($rows === []) {
+            return null;
+        }
+        $discount = new \SpecificPrice((int) $rows[0]['id_specific_price']);
+        if (!\Validate::isLoadedObject($discount)) {
+            throw new \RuntimeException('Unable to load product discount.');
+        }
+
+        return (float) $discount->price < 0 && $discount->reduction_type === 'amount' && !$discount->reduction_tax ? (float) $discount->reduction : null;
+    }
+
+    /** @return list<array{id_specific_price: string}> */
+    private function discountRows(int $idProduct): array
     {
         $shopId = (int) \Context::getContext()->shop->id;
         $date = \SpecificPrice::ORDER_DEFAULT_DATE;
@@ -17,6 +42,15 @@ class ProductDiscountSetter
         if ($rows === false) {
             throw new \RuntimeException('Unable to find product discount.');
         }
+
+        return $rows;
+    }
+
+    public function apply(int $idProduct, ?float $regularPrice, ?float $currentPrice): void
+    {
+        $shopId = (int) \Context::getContext()->shop->id;
+        $date = \SpecificPrice::ORDER_DEFAULT_DATE;
+        $rows = $this->discountRows($idProduct);
         $hasDiscount = $regularPrice !== null && $currentPrice !== null && $regularPrice > $currentPrice;
         foreach ($rows as $index => $row) {
             $discount = new \SpecificPrice((int) $row['id_specific_price']);

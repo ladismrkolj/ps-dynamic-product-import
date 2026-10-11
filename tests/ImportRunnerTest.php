@@ -222,7 +222,7 @@ class ImportRunnerTest extends TestCase
             public function __construct(private object $state)
             {
             }
-            public function savedPrice(int $idProduct): float
+            public function variantBasePrice(int $idProduct): float
             {
                 return 123.5;
             }
@@ -368,14 +368,15 @@ class ImportRunnerTest extends TestCase
         self::assertSame([[1, 0]], $state->emptyStreakUpdates);
     }
 
-    public function testVariantsUseMappedPrice(): void
+    public function testVariantsUseTheCatalogBasePriceNotTheFeedPrice(): void
     {
+        // The base is what the store will add impacts to (sale price when discounted), not the mapped product price.
         [$runner, $state] = $this->fixture([['id' => 'old', 'price' => 2826.53, 'variants' => [['sku' => 'good']]]]);
         $source = $this->source(['variant_mapping' => ['variants_expression' => 'fields["variants"]', 'attributes' => [['name' => 'Size', 'expression' => '"M"']], 'fields' => ['reference' => 'variant["sku"]']]]);
         $source['field_mapping']['price'] = 'fields["price"]';
         $result = $runner->runOne($source, 'admin-manual');
         self::assertSame('completed', $result['status']);
-        self::assertSame([2826.53], $state->prices);
+        self::assertSame([123.5], $state->prices);
     }
 
     public function testVariantsUseSavedPriceWhenPriceIsNotMappedAndContinueAfterFailure(): void

@@ -8,9 +8,22 @@ class ImportCatalog
     /** @var array<int,true> products the import is deleting right now; the delete hook must not tombstone them */
     private static array $deleting = [];
 
-    public function savedPrice(int $idProduct): float
+    /**
+     * The price PrestaShop adds combination impacts to, read after the product price and discount were written:
+     * the sale price when the module's always-on discount applies, else the product price (also when the base
+     * price is protected as a manual edit, because the store's own values are used).
+     */
+    public function variantBasePrice(int $idProduct): float
     {
-        return (float) $this->product($idProduct)->price;
+        $price = \Db::getInstance()->getValue(
+            'SELECT `price` FROM `' . _DB_PREFIX_ . 'product_shop` WHERE `id_product` = ' . $idProduct
+            . ' AND `id_shop` = ' . (int) \Context::getContext()->shop->id
+        );
+        if ($price === false || $price === null) {
+            throw new \RuntimeException('Product does not exist: ' . $idProduct);
+        }
+
+        return ProductDiscountSetter::impactBase((float) $price, (new ProductDiscountSetter())->activeReduction($idProduct));
     }
 
     public static function isDeleting(int $idProduct): bool
