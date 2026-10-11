@@ -32,13 +32,7 @@ class AdminPiRunLogController extends ModuleAdminController
         $repository = new ImportRunRepository();
         $idSource = (int) Tools::getValue('id_source');
         $rows = $idSource > 0 ? $repository->findRecent($idSource) : $repository->findAll();
-        // HelperList text columns are not consistently autoescaped.
-        foreach ($rows as &$row) {
-            foreach (['source_name', 'status', 'triggered_by', 'error_log'] as $field) {
-                $row[$field] = Tools::safeOutput((string) ($row[$field] ?? ''));
-            }
-        }
-        unset($row);
+        // HelperList's list_content.tpl escapes text values itself (escape:'html'); never pre-escape.
         $helper = new HelperList();
         $helper->table = $this->table;
         $helper->identifier = $this->identifier;
