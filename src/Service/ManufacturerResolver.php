@@ -7,6 +7,8 @@ class ManufacturerResolver
     private \ProductImport\Repository\ManufacturerMappingRepository $mappings;
     /** @var array<string, int|null|array> Per-instance (per-run) results; commit mode is part of the key. */
     private array $cache = [];
+    /** @var list<string> */
+    private array $notices = [];
 
     public function __construct(?\ProductImport\Repository\ManufacturerMappingRepository $mappings = null)
     {
@@ -44,6 +46,15 @@ class ManufacturerResolver
         return $result;
     }
 
+    /** @return list<string> run-log lines about mappings repaired since the last call */
+    public function drainNotices(): array
+    {
+        $notices = $this->notices;
+        $this->notices = [];
+
+        return $notices;
+    }
+
     public static function cacheKey(int $idSource, ?int $defaultId, bool $commit, string $name): string
     {
         return $idSource . '|' . ($defaultId ?? 'n') . '|' . ($commit ? 'c' : 'p') . '|' . $name;
@@ -51,31 +62,35 @@ class ManufacturerResolver
 
     private function lookup(string $name, int $idSource, bool $commit, ?int $defaultId): int|array
     {
-        $override = $this->mappings->findOverride($idSource, $name);
-        if ($override !== null && $override['id_manufacturer'] !== null) {
-            $id = (int) $override['id_manufacturer'];
-            return $commit ? $id : ['name' => $name, 'id_manufacturer' => $id, 'auto_create' => false];
+        // A name over the column length cannot have a row; it is still resolved, just never recorded or connected.
+        $recordable = mb_strlen($name) <= 191;
+        if ($commit && $recordable) {
+            $this->mappings->upsertSeen($idSource, $name);
         }
-        if ($defaultId !== null) {
+        $row = $this->mappings->findOverride($idSource, $name);
+        $mapped = $row !== null && $row['id_manufacturer'] !== null ? (int) $row['id_manufacturer'] : null;
+        $plan = MappingResolution::plan($mapped, $mapped !== null && $this->mappings->manufacturerExists($mapped), $defaultId, $commit);
+        if ($plan['decision'] === MappingResolution::OVERRIDE) {
+            return $commit ? $mapped : ['name' => $name, 'id_manufacturer' => $mapped, 'auto_create' => false];
+        }
+        if ($plan['missing']) {
+            $this->notices[] = 'brand "' . $name . '": mapped manufacturer #' . $mapped . ' no longer exists, mapping cleared and resolved again';
+        }
+        if ($plan['clear']) {
+            $this->mappings->setOverride($idSource, $name, null);
+        }
+        if ($plan['decision'] === MappingResolution::DEFAULT) {
             return $commit ? $defaultId : ['name' => $name, 'id_manufacturer' => $defaultId, 'auto_create' => false];
         }
-        // Manufacturer names are in manufacturer itself, not manufacturer_lang.
-        $id = \Db::getInstance()->getValue(
-            'SELECT `id_manufacturer` FROM `' . _DB_PREFIX_ . "manufacturer` WHERE BINARY `name` = '" . pSQL($name, true) . "' ORDER BY `id_manufacturer`"
-        );
+        $id = $this->mappings->findIdByName($name);
         if (!$commit) {
-            return ['name' => $name, 'id_manufacturer' => $id === false ? null : (int) $id, 'auto_create' => $id === false];
+            return ['name' => $name, 'id_manufacturer' => $id, 'auto_create' => $id === null];
         }
-        if ($id !== false) {
-            return (int) $id;
-        }
-        $manufacturer = new \Manufacturer();
-        $manufacturer->name = $name;
-        $manufacturer->active = true;
-        if (!$manufacturer->add()) {
-            throw new \RuntimeException('Unable to create manufacturer: ' . $name);
+        $id ??= $this->mappings->create($name);
+        if ($plan['connect'] && $recordable) {
+            $this->mappings->setOverride($idSource, $name, $id);
         }
 
-        return (int) $manufacturer->id;
+        return $id;
     }
 }

@@ -42,13 +42,13 @@
         state.loaded = true;
         state.pane.replaceChildren();
         var help = document.createElement('p');
-        help.textContent = data.rows.length + ' listed. Changes here are saved immediately, independent of the main Save button. The feed is read automatically when the source settings change; rows appear here once the feed contains them.';
+        help.textContent = data.rows.length + ' listed. A value without a mapping is resolved by the next import (the source default if one is set, otherwise an existing ' + (type === 'category' ? 'category with the same name path, or a new one' : 'brand with the same name, or a new one') + ') and the result is stored here as its mapping. Choose the empty option to clear a mapping so the next import resolves it again. Changes here are saved immediately, independent of the main Save button. The feed is read automatically when the source settings change; rows appear here once the feed contains them.';
         state.pane.appendChild(help);
         var label = document.createElement('label'); label.textContent = 'Default for anything not mapped below';
         state.pane.appendChild(label);
-        var defaultSelect = select(data.options, data.default, 'Auto-create (no default)');
+        var defaultSelect = select(data.options, data.default, 'No default (find or create, then connect)');
         label.appendChild(defaultSelect);
-        function save(control, action, key, indicator, status, rematch) {
+        function save(control, action, key, indicator, status) {
           control.addEventListener('change', function () {
             var value = control.value;
             control.disabled = true; indicator.textContent = 'Saving…';
@@ -56,7 +56,6 @@
               .then(function (result) {
                 indicator.textContent = 'Saved';
                 if (status) status.textContent = result.status;
-                if (rematch) rematch.hidden = !result.auto;
                 if (action === 'saveDefault') load(type);
               })
               .catch(function (error) { indicator.textContent = error.message; })
@@ -70,7 +69,7 @@
         var addText = document.createElement('input'); addText.type = 'text'; addText.className = 'form-control'; addText.style.minWidth = '260px';
         addText.placeholder = type === 'category' ? 'Feed category, e.g. Sports > Sails' : 'Feed brand name';
         addText.setAttribute('aria-label', type === 'category' ? 'Feed category path to add' : 'Feed brand name to add');
-        var addSelect = select(data.options, null, 'Auto-create');
+        var addSelect = select(data.options, null, 'Not mapped (default, else find or create, then connect)');
         addSelect.setAttribute('aria-label', 'Destination for the new row');
         var addButton = document.createElement('button'); addButton.type = 'button'; addButton.className = 'btn btn-default'; addButton.textContent = 'Add row';
         var addIndicator = document.createElement('span'); addIndicator.setAttribute('aria-live', 'polite');
@@ -103,35 +102,21 @@
           tr.insertCell().appendChild(badge);
           var status = tr.insertCell(); status.textContent = row.status;
           var cell = tr.insertCell();
-          var control = select(data.options, row.id, 'Use default (auto-create if none)');
+          var control = select(data.options, row.id, 'Not mapped (default, else find or create, then connect)');
           control.setAttribute('aria-label', 'Destination for ' + row.label);
           cell.appendChild(control);
           var indicator = document.createElement('span'); indicator.setAttribute('aria-live', 'polite'); cell.appendChild(indicator);
-          var rematch = null;
-          if (type === 'category') {
-            rematch = document.createElement('button'); rematch.type = 'button'; rematch.className = 'btn btn-default btn-sm'; rematch.textContent = 'Re-match by name';
-            rematch.setAttribute('aria-label', 'Re-match by name: ' + row.label);
-            rematch.hidden = !row.auto;
-            rematch.addEventListener('click', function () {
-              if (!window.confirm('Forget the remembered category for "' + row.label + '"? The next import looks the category up by name again (under the source root category, Home by default) and may create a new one there.')) return;
-              rematch.disabled = true;
-              post('rematchCategory', type, {key: row.key})
-                .then(function () { load(type); })
-                .catch(function (error) { indicator.textContent = error.message; rematch.disabled = false; });
-            });
-          }
-          save(control, 'saveMapping', row.key, indicator, status, rematch);
+          save(control, 'saveMapping', row.key, indicator, status);
           var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm'; remove.textContent = 'Delete';
           remove.setAttribute('aria-label', 'Delete row ' + row.label);
           remove.addEventListener('click', function () {
-            if (!window.confirm('Delete the row for "' + row.label + '"? If the feed still contains it, it reappears as auto-create the next time the feed is read.')) return;
+            if (!window.confirm('Delete the row for "' + row.label + '"? If the feed still contains it, it reappears as not mapped the next time the feed is read.')) return;
             remove.disabled = true;
             post('deleteMapping', type, {key: row.key})
               .then(function () { load(type); })
               .catch(function (error) { indicator.textContent = error.message; remove.disabled = false; });
           });
           var actions = tr.insertCell();
-          if (rematch) { actions.appendChild(rematch); actions.appendChild(document.createTextNode(' ')); }
           actions.appendChild(remove);
         });
         state.pane.appendChild(table);

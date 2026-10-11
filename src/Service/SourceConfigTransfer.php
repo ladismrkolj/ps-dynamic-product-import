@@ -35,7 +35,7 @@ class SourceConfigTransfer
         $path = static function (?array $segments) {
             return $segments === null ? null : self::pathKey($segments);
         };
-        // Maps "feed value: destination" (destination null = auto-create). Feed values are unique per source, so keys never collide.
+        // Maps "feed value: destination" (destination null = not mapped: default, else find or create, then connect). Feed values are unique per source, so keys never collide.
         $categories = [];
         foreach ($categoryMappings as $row) {
             $feedPath = json_decode((string) $row['source_path'], true);
@@ -92,10 +92,9 @@ class SourceConfigTransfer
             . "# field_mapping:      PrestaShop field: feed expression.\n"
             . "# root_category:      where new categories are created. ~ or null = Home. Existing categories are never moved.\n"
             . "# category_mappings:  feed category path: PrestaShop category path below the shop root (names joined with ' > ',\n"
-            . "#                     matched exactly). ~ or null = create the category automatically. A name that itself\n"
+            . "#                     matched exactly). ~ or null = resolve and connect it again on the next run. A name that itself\n"
             . "#                     contains ' > ' cannot be written here.\n"
-            . "#                     The category an import remembered for a path is store-specific and is not part of this file.\n"
-            . "# brand_mappings:     feed brand name: PrestaShop brand name. ~ or null = create it automatically.\n"
+            . "# brand_mappings:     feed brand name: PrestaShop brand name. ~ or null = resolve and connect it again on the next run.\n"
             . "# Mapping entries are matched by their feed value and each feed value may appear once. Listed entries are\n"
             . "# added or updated, others are kept. An entry for a feed value not seen yet is stored and used once the feed\n"
             . "# contains it. If the PrestaShop destination does not exist, the entry is skipped with a warning.\n\n";
@@ -193,7 +192,7 @@ class SourceConfigTransfer
             }
             self::requireStringDestination($destination, 'brand_mappings', $name);
             if ($destination !== null && (!is_string($destination) || $destination === '')) {
-                throw new \InvalidArgumentException('brand_mappings: the destination of "' . $name . '" must be a PrestaShop brand name or ~ (auto-create).');
+                throw new \InvalidArgumentException('brand_mappings: the destination of "' . $name . '" must be a PrestaShop brand name or ~ (not mapped: default, else find or create, then connect).');
             }
             $brands[] = ['source_name' => $name, 'manufacturer' => $destination];
         }
@@ -293,7 +292,7 @@ class SourceConfigTransfer
      * @throws \InvalidArgumentException when the resulting source would be invalid
      *
      * @return array{source: array, category_mappings: list<array>, brand_mappings: list<array>, warnings: list<string>}
-     *               source holds only the changed pi_source columns; mapping rows are the entries to upsert (id_category / id_manufacturer null = auto-create)
+     *               source holds only the changed pi_source columns; mapping rows are the entries to upsert (id_category / id_manufacturer null = not mapped: default, else find or create, then connect)
      */
     public function resolveOverwrite(array $document, array $existing, array $lookups): array
     {
@@ -353,7 +352,7 @@ class SourceConfigTransfer
     }
     /**
      * Resolves the mapping entries to IDs. An entry whose destination does not exist in this store is skipped with a warning,
-     * so an existing row stays as it is and no new row is created for it. null destination = auto-create.
+     * so an existing row stays as it is and no new row is created for it. null destination = not mapped: default, else find or create, then connect.
      *
      * @return array{0: list<array>, 1: list<array>} categories, brands
      */

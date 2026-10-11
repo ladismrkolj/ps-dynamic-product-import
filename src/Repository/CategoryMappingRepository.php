@@ -74,28 +74,6 @@ class CategoryMappingRepository
         }
     }
 
-    /** Remembers the category the name walk produced for this feed path (`id_category_auto`). Scoped by source. */
-    public function setAuto(int $idSource, string $hash, int $idCategory): void
-    {
-        if (!\Db::getInstance()->execute(
-            'UPDATE `' . _DB_PREFIX_ . 'pi_category_mapping` SET `id_category_auto` = ' . (int) $idCategory
-            . ' WHERE `id_source` = ' . (int) $idSource . " AND `source_path_hash` = '" . pSQL($hash) . "'"
-        )) {
-            throw new \RuntimeException(DbError::message('Unable to remember auto category'));
-        }
-    }
-
-    /** Forgets the remembered category so the next import walks the name path again. Scoped by source. */
-    public function clearAuto(int $idSource, string $hash): void
-    {
-        if (!\Db::getInstance()->execute(
-            'UPDATE `' . _DB_PREFIX_ . 'pi_category_mapping` SET `id_category_auto` = NULL WHERE `id_source` = ' . (int) $idSource
-            . " AND `source_path_hash` = '" . pSQL($hash) . "'"
-        )) {
-            throw new \RuntimeException(DbError::message('Unable to clear auto category'));
-        }
-    }
-
     /** Insert or replace one mapping row with its override (used when importing a source configuration). */
     public function upsertWithOverride(int $idSource, string $hash, string $sourcePath, ?int $idCategory): void
     {
@@ -153,5 +131,16 @@ class CategoryMappingRepository
         }
 
         return $current === $idRoot && $path !== [] ? $path : null;
+    }
+
+    /** Throws on a database error, so a failed query is never read as "deleted". */
+    public function categoryExists(int $idCategory): bool
+    {
+        $rows = \Db::getInstance()->executeS('SELECT `id_category` FROM `' . _DB_PREFIX_ . 'category` WHERE `id_category` = ' . (int) $idCategory);
+        if ($rows === false) {
+            throw new \RuntimeException(DbError::message('Unable to check category'));
+        }
+
+        return $rows !== [];
     }
 }

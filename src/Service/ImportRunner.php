@@ -104,8 +104,20 @@ class ImportRunner
                 } elseif (is_scalar($values['ean13'] ?? null)) {
                     $values['ean13'] = trim((string) $values['ean13']);
                 }
-                $categoryIds = isset($values['category_paths']) ? $this->categories->resolve($this->normalizer->normalize($values['category_paths']), $idSource, isset($source['root_category_id']) ? (int) $source['root_category_id'] : null, true, isset($source['default_id_category']) ? (int) $source['default_id_category'] : null) : [];
-                $manufacturer = $this->manufacturers->resolve($values['manufacturer'] ?? null, $idSource, true, isset($source['default_id_manufacturer']) ? (int) $source['default_id_manufacturer'] : null);
+                try {
+                    $categoryIds = isset($values['category_paths']) ? $this->categories->resolve($this->normalizer->normalize($values['category_paths']), $idSource, isset($source['root_category_id']) ? (int) $source['root_category_id'] : null, true, isset($source['default_id_category']) ? (int) $source['default_id_category'] : null) : [];
+                } finally {
+                    foreach ($this->categories->drainNotices() as $notice) {
+                        $this->log($log, "item $index: $notice");
+                    }
+                }
+                try {
+                    $manufacturer = $this->manufacturers->resolve($values['manufacturer'] ?? null, $idSource, true, isset($source['default_id_manufacturer']) ? (int) $source['default_id_manufacturer'] : null);
+                } finally {
+                    foreach ($this->manufacturers->drainNotices() as $notice) {
+                        $this->log($log, "item $index: $notice");
+                    }
+                }
                 $idSupplier = isset($source['id_supplier']) && $source['id_supplier'] !== null ? (int) $source['id_supplier'] : null;
                 $feedHash = self::feedHash($item, $source, $categoryIds, $manufacturer, $this->moduleVersion());
                 if ($existing !== null && $this->productLinks->findFeedHash($idSource, $externalId) === $feedHash) {

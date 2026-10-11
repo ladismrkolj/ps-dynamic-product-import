@@ -175,9 +175,15 @@ class ImportRunnerTest extends TestCase
                 return true;
             }
         };
-        $categories = new class () extends CategoryResolver {
-            public function __construct()
+        $categories = new class ($state) extends CategoryResolver {
+            public function __construct(private object $state)
             {
+            }
+            public function drainNotices(): array
+            {
+                $notices = $this->state->notices ?? [];
+                $this->state->notices = [];
+                return $notices;
             }
             public function resolve(array $paths, int $source, ?int $root, bool $commit = true, ?int $defaultId = null): array
             {
@@ -287,6 +293,14 @@ class ImportRunnerTest extends TestCase
     {
         return $overrides + ['id_source' => 1, 'default_id_category' => 23, 'default_id_manufacturer' => 24, 'active' => 1, 'identifier_field' => 'id', 'id_lang_default' => 1,
             'field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]'], 'filter_expression' => 'path(fields, "skip") != true', 'deactivate_missing' => false, 'consecutive_empty_count' => 0, 'source_format' => 'json'];
+    }
+
+    public function testRepairedMappingNoticesAreWrittenToTheRunLog(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new']]);
+        $state->notices = ['category "Boards": mapped category #9 no longer exists, reconnected to #3'];
+        $result = $runner->runOne($this->source(), 'admin-manual');
+        self::assertStringContainsString('item 0: category "Boards": mapped category #9 no longer exists, reconnected to #3', $result['error_log']);
     }
 
     public function testMixedItemsAndCleanupOnlyStaleLinks(): void

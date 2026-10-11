@@ -197,22 +197,25 @@ Identifier `product_id`.
 
 ## Categories and brands
 
-The editor's **Categories** and **Brands** tabs list every category path and brand name found. Discovery (**Discover categories from full JSON** and the brand equivalent) scans the whole feed with only that expression, and ignores the filter. It creates nothing and is additive. Each entry can be overridden to an existing PrestaShop category or brand. An empty choice means auto-create. Each tab also has a **Default for anything not mapped below**. For brands the precedence is: explicit override, then source default, then exact-name match or auto-create (categories: see below). A blank brand name or an empty category path gets no default. Overrides and defaults save immediately, independently of the main Save button. Source saves leave them untouched.
+The editor's **Categories** and **Brands** tabs list every category path and brand name found. Discovery (**Discover categories from full JSON** and the brand equivalent) scans the whole feed with only that expression, and ignores the filter. It creates nothing and only records the values. Each entry can be mapped to an existing PrestaShop category or brand. Each tab also has a **Default for anything not mapped below**. A blank brand name or an empty category path gets no default. Mappings and defaults save immediately, independently of the main Save button. Source saves leave them untouched.
 
-### Categories: matching, moving and renaming
+### How a value is resolved
 
-A category is resolved in this order:
+A category path or brand name is resolved in this order:
 
-1. the explicit override chosen for the feed path;
-2. the source default;
-3. the category remembered for that path (the Categories tab shows it as `auto → Home > Sport > Boards #12`), as long as it still exists;
-4. otherwise the feed path is walked by exact name under the source's root category, missing categories are created, and the resulting category is remembered for that path.
+1. its mapping (the existing category or brand chosen for it, or stored by an earlier import), as long as that target still exists;
+2. the source default. It applies only to values that are not mapped;
+3. otherwise a category path is walked by exact name under the source's root category, creating the missing categories; a brand is looked up by exact name and created when it is missing.
+
+**The result of step 3 is connected on the first import.** A committed import writes the category or brand it found or created into that row as its mapping. From then on the row is an ordinary mapping: the tab shows `existing category #12 (Sport > Boards)` or `existing manufacturer #4 (Acme)`, you can change it in the dropdown, and you can **move or rename** the category or brand in the back office and the next import keeps using it, with no duplicate. Values resolved by a source default are not connected, because the default decides them. The preview shows what an import would do and never writes mappings.
+
+To make a row resolve again, set its dropdown to the empty choice (the mapping is cleared). The next import resolves it by name or default and connects it again. Use this when a feed value should go to a different, name-matching category or brand.
+
+If a mapped category or brand has been deleted in the shop, the next import clears that mapping, resolves the value again as in step 2 or 3 (which connects the recreated or matching target) and writes one line per value to the run log. The preview shows the source default if one is set, otherwise what the name walk or lookup would pick (or auto-create when nothing matches), and changes nothing.
 
 The root category defaults to **Home** (`PS_HOME_CATEGORY`), so new categories appear in the storefront menu. The technical Root category next to Home is used only if you select it. Changing the root does not move existing categories.
 
-Because the import remembers the category it found or created, you can **move or rename** it in Catalog > Categories and the next import keeps using it, with no duplicate. Categories found by name are remembered too, so existing installs adopt their current categories on the next run. If a remembered category is deleted, the next import walks the name path again, creating a new one if needed, and remembers that. The preview uses a remembered category when there is one and never writes.
-
-**Re-match by name** (row action on the Categories tab, shown for remembered rows) forgets the remembered category. The next import looks the path up by name again and may create a new category under the root. Use it when the feed path should map to a different, name-matching category. Remembered categories are store-specific and are not part of the YAML export or import.
+Connected rows are exported to YAML like any other mapping, by category path or brand name.
 
 ## Keeping manual edits
 
@@ -289,7 +292,7 @@ source:
   location: https://example.com/feed.json   # URL, or a file path inside the import folder
 category_mappings:
   'Windsurf > Sails': 'Home > Boards'   # feed category path: PrestaShop path
-  'Demo Fins': ~                        # ~ or null = auto-create
+  'Demo Fins': ~                        # ~ or null = not mapped (default, else find or create, then connect)
 brand_mappings:
   'Demo Watersports': 'Graphic Corner'
 ```
@@ -299,7 +302,7 @@ Export writes every mapping key and value as a single-quoted string (a quote is 
 Paths are joined with ` > `. A category name that itself contains ` > ` cannot be written; export and import reject it. Each feed value may appear once (a duplicate key is an error). Entries for feed categories or brands the feed has not shown yet are stored as pre-mapped rows ("not seen yet" in the editor) and apply once the feed contains them.
 
 - **Create new source** (default) never touches existing sources. A taken key becomes `<key>_2`, `_3`, … and ` (imported)` is appended to the name.
-- **Overwrite existing source** (needs edit permission) applies the file in one transaction. Settings in the file replace the source's settings and missing ones stay. `technical_key` never changes. A present `field_mapping` or `variant_mapping` replaces the whole mapping. Each listed category or brand entry is added or updated, and entries not listed stay. `~` resets that entry to auto-create. The merged source is validated like the form. Changed mappings make the next run reimport affected products.
+- **Overwrite existing source** (needs edit permission) applies the file in one transaction. Settings in the file replace the source's settings and missing ones stay. `technical_key` never changes. A present `field_mapping` or `variant_mapping` replaces the whole mapping. Each listed category or brand entry is added or updated, and entries not listed stay. `~` clears that entry (not mapped: default, else find or create, then connect). The merged source is validated like the form. Changed mappings make the next run reimport affected products.
 
 Names are matched in this store: categories by exact, case-sensitive path from the shop root in the source's language (each segment must match exactly one category), brands and suppliers by exact name, and the language by ISO code. Unmatched settings are left unset (new source) or unchanged (overwrite). A mapping entry whose destination category or brand does not exist is skipped with a warning: an existing row stays as it is and no row is created. Import never creates categories or brands. Files over 1 MB, unknown format or version, and invalid values are rejected.
 

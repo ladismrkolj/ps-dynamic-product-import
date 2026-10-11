@@ -104,4 +104,40 @@ class ManufacturerMappingRepository
 
         return $name === false || $name === null || $name === '' ? null : (string) $name;
     }
+
+    /** Throws on a database error, so a failed query is never read as "deleted". */
+    public function manufacturerExists(int $idManufacturer): bool
+    {
+        $rows = \Db::getInstance()->executeS('SELECT `id_manufacturer` FROM `' . _DB_PREFIX_ . 'manufacturer` WHERE `id_manufacturer` = ' . (int) $idManufacturer);
+        if ($rows === false) {
+            throw new \RuntimeException(DbError::message('Unable to check manufacturer'));
+        }
+
+        return $rows !== [];
+    }
+
+    /** Exact (binary) name match; the lowest ID wins. Names are in manufacturer itself, not manufacturer_lang. */
+    public function findIdByName(string $name): ?int
+    {
+        $rows = \Db::getInstance()->executeS(
+            'SELECT `id_manufacturer` FROM `' . _DB_PREFIX_ . "manufacturer` WHERE BINARY `name` = '" . pSQL($name, true) . "' ORDER BY `id_manufacturer` LIMIT 1"
+        );
+        if ($rows === false) {
+            throw new \RuntimeException(DbError::message('Unable to look up manufacturer'));
+        }
+
+        return $rows === [] ? null : (int) $rows[0]['id_manufacturer'];
+    }
+
+    public function create(string $name): int
+    {
+        $manufacturer = new \Manufacturer();
+        $manufacturer->name = $name;
+        $manufacturer->active = true;
+        if (!$manufacturer->add()) {
+            throw new \RuntimeException('Unable to create manufacturer: ' . $name);
+        }
+
+        return (int) $manufacturer->id;
+    }
 }

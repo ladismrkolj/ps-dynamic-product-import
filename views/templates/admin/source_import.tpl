@@ -14,7 +14,7 @@
         <option value="{$pi_source.id_source|intval}">{$pi_source.name|escape:'html':'UTF-8'} ({$pi_source.technical_key|escape:'html':'UTF-8'})</option>
         {/foreach}
       </select>
-      <p class="help-block">Entries in the file overwrite the source; settings and category or brand mappings missing from the file are kept unchanged. The technical key is never changed. A mapping written as <code>Feed value: ~</code> resets that entry to auto-create. If the PrestaShop destination does not exist, the entry is left unchanged and listed as a warning.</p>
+      <p class="help-block">Entries in the file overwrite the source; settings and category or brand mappings missing from the file are kept unchanged. The technical key is never changed. A mapping written as <code>Feed value: ~</code> clears that entry, so the next import resolves it again and connects it. If the PrestaShop destination does not exist, the entry is left unchanged and listed as a warning.</p>
     </div>
     {/if}
   </div>
@@ -107,7 +107,7 @@
           warn.className = 'alert alert-warning';
           warn.appendChild(document.createTextNode(data.mode === 'overwrite'
             ? 'These names did not match this store and were left as they were:'
-            : 'Review these before running the import. Unmatched names were left unset (categories and brands are auto-created, or the source default applies):'));
+            : 'Review these before running the import. Unmatched names were left unset (they are resolved by the next import: the source default, else found or created, then connected):'));
           var list = document.createElement('ul');
           data.warnings.forEach(function (text) {
             var item = document.createElement('li');

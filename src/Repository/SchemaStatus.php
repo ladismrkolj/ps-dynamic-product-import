@@ -9,6 +9,9 @@ class SchemaStatus
     /** @var array<string,array{table_missing:bool,columns:list<string>}>|null */
     private static $missing;
 
+    /** @var list<string>|null */
+    private static $pending;
+
     /** @return array<string,list<string>>|null table name without prefix => existing column names; null when the lookup failed */
     public static function actualColumns(): ?array
     {
@@ -35,6 +38,28 @@ class SchemaStatus
     public static function reset(): void
     {
         self::$missing = null;
+        self::$pending = null;
+    }
+
+    /** @return list<string> ids of registered migration steps that are not recorded as applied and still apply; cached per request */
+    public static function pendingSteps(): array
+    {
+        if (self::$pending !== null) {
+            return self::$pending;
+        }
+        $actual = self::actualColumns();
+        if ($actual === null) {
+            return self::$pending = [];
+        }
+        $applied = (new \ProductImport\Service\Upgrade\DbUpgradeStore())->applied();
+        $pending = [];
+        foreach (\ProductImport\Service\Upgrade\Migrations::all() as $step) {
+            if (!in_array($step->id(), $applied, true) && $step->applies($actual)) {
+                $pending[] = $step->id();
+            }
+        }
+
+        return self::$pending = $pending;
     }
 
     /** @return array<string,array{table_missing:bool,columns:list<string>}> missing tables/columns keyed by table name without prefix; cached per request */
@@ -60,7 +85,8 @@ class SchemaStatus
     public static function alertHtml(string $actionUrl = ''): string
     {
         $missing = self::missing();
-        if ($missing === []) {
+        $pending = self::pendingSteps();
+        if ($missing === [] && $pending === []) {
             return '';
         }
         $items = '';
@@ -68,6 +94,9 @@ class SchemaStatus
             $items .= '<li><code>' . \Tools::safeOutput(_DB_PREFIX_ . $table) . '</code>: '
                 . ($info['table_missing'] ? 'table is missing (' : 'missing columns ')
                 . '<code>' . \Tools::safeOutput(implode(', ', $info['columns'])) . '</code>' . ($info['table_missing'] ? ')' : '') . '</li>';
+        }
+        if ($pending !== []) {
+            $items .= '<li>data migration not run yet: <code>' . \Tools::safeOutput(implode(', ', $pending)) . '</code></li>';
         }
         $button = $actionUrl === '' ? '' : '<form method="post" action="' . \Tools::safeOutput($actionUrl) . '" onsubmit="return confirm(\'Back up the database first. Update the module data now?\');">'
             . '<button type="submit" name="submitPiMigrate" value="1" class="btn btn-default">Update module data</button></form>';

@@ -56,7 +56,6 @@ class SchemaCheck
                 'source_path_hash' => 'CHAR(40) NOT NULL',
                 'source_path' => 'TEXT NOT NULL',
                 'id_category' => 'INT UNSIGNED NULL',
-                'id_category_auto' => 'INT UNSIGNED NULL',
                 'date_seen' => 'DATETIME NULL',
                 'date_upd' => 'DATETIME NOT NULL',
             ],

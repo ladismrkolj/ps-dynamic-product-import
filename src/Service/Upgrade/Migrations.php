@@ -14,6 +14,7 @@ class Migrations
             new ObsoleteTabsStep(),
             new FeedDirStep(),
             new DeleteMissingDaysStep(),
+            new ConnectAutoCategoriesStep(),
         ];
     }
 }

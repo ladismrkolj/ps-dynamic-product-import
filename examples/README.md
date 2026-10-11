@@ -46,7 +46,7 @@ product mapping use these expressions (Custom expression where necessary):
 
 Leave filters, variants and images unset. Save. The Categories and Brands
 tabs fill automatically from the loaded feed; leave the discovered
-paths/brand on auto-create in the disposable store. Run each import.
+paths/brand not mapped (found or created, then connected) in the disposable store. Run each import.
 
 Expected module-mapped values (before store tax/currency display rules):
 
