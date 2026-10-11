@@ -50,16 +50,32 @@ class NativeFieldsTest extends TestCase
         }
         self::assertNull(NativeFields::deliveryTime(null));
         self::assertNull(NativeFields::deliveryTime(' '));
+        self::assertNull(NativeFields::deliveryTime(''));
+        self::assertSame(0, NativeFields::deliveryTime(0.0));
+        self::assertSame(1, NativeFields::deliveryTime(1.0));
+        self::assertSame(2, NativeFields::deliveryTime(2.0));
     }
 
     public function testDeliveryTimeRejectsUnknown(): void
     {
-        foreach (['soon', '3', 3, 1.0, true, []] as $input) {
+        foreach (['soon', '3', 3, 15, 1.5, 3.0, true, false, []] as $input) {
             try {
                 NativeFields::deliveryTime($input);
                 self::fail('expected rejection of ' . json_encode($input));
             } catch (\InvalidArgumentException) {
                 self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testDeliveryTimeErrorNamesTheValue(): void
+    {
+        foreach (['"15"' => '15', '15' => 15, 'true' => true] as $expected => $input) {
+            try {
+                NativeFields::deliveryTime($input);
+                self::fail('expected rejection');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame('delivery_time must be none, default or custom (or 0, 1, 2); got ' . $expected, $e->getMessage());
             }
         }
     }

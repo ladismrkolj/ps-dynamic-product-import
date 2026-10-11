@@ -139,7 +139,13 @@ class PreviewBuilderTest extends TestCase
         ]]);
         $items = [
             ['id' => 'A', 'name' => 'One', 'related' => ['B', 'A', 'REF-1', 'GHOST'], 'features' => ['Color' => 'Red', 'Empty' => '', 'Size' => 'L'], 'delivery' => 'custom', 'carriers' => ['DPD', 'Nope', '7', '9'], 'meta' => str_repeat('x', 300)],
-            ['id' => 'B', 'name' => 'Two', 'related' => 'A', 'features' => [['name' => 'Material', 'value' => 'Wood']], 'delivery' => 'soon', 'carriers' => [], 'meta' => 'short'],
+            ['id' => 'B', 'name' => 'Two', 'related' => 'A', 'features' => [['name' => 'Material', 'value' => 'Wood']], 'delivery' => '15', 'carriers' => [], 'meta' => 'short'],
+            ['id' => 'C', 'name' => 'Three', 'delivery' => null],
+            ['id' => 'D', 'name' => 'Four', 'delivery' => ''],
+            ['id' => 'E', 'name' => 'Five', 'delivery' => 'Custom'],
+            ['id' => 'F', 'name' => 'Six', 'delivery' => 2.0],
+            ['id' => 'G', 'name' => 'Seven', 'delivery' => 15],
+            ['id' => 'H', 'name' => 'Eight', 'delivery' => true],
         ];
         $owner = static fn (string $reference, array $item): ?int => $reference === 'REF-1' ? 5 : null;
         $carriers = [['id_reference' => 7, 'name' => 'DPD'], ['id_reference' => 8, 'name' => 'Pošta']];
@@ -156,7 +162,13 @@ class PreviewBuilderTest extends TestCase
         $second = $rows[1]['cells'];
         self::assertNull($second['related_products']['note']);
         self::assertSame('Material: Wood', $second['features']['value']);
-        self::assertSame('delivery_time must be none, default or custom', $second['delivery_time']['error']);
+        self::assertSame('delivery_time must be none, default or custom (or 0, 1, 2); got "15"', $second['delivery_time']['error']);
+        foreach ([2 => null, 3 => '', 4 => 'Custom', 5 => '2'] as $row => $text) {
+            self::assertNull($rows[$row]['cells']['delivery_time']['error'], (string) $row);
+            self::assertSame($text, $rows[$row]['cells']['delivery_time']['value'], (string) $row);
+        }
+        self::assertSame('delivery_time must be none, default or custom (or 0, 1, 2); got 15', $rows[6]['cells']['delivery_time']['error']);
+        self::assertSame('delivery_time must be none, default or custom (or 0, 1, 2); got true', $rows[7]['cells']['delivery_time']['error']);
         self::assertNull($second['carriers']['error']);
         self::assertNull($second['meta_title']['note']);
     }

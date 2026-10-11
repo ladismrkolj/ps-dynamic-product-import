@@ -62,13 +62,17 @@ final class NativeFields
         if ($value === null || (is_string($value) && trim($value) === '')) {
             return null;
         }
+        if (is_float($value) && in_array($value, [0.0, 1.0, 2.0], true)) {
+            return (int) $value;
+        }
         if (is_int($value) || is_string($value)) {
             $key = is_string($value) ? strtolower(trim($value)) : (string) $value;
             if (isset(self::DELIVERY_TIMES[$key])) {
                 return self::DELIVERY_TIMES[$key];
             }
         }
-        throw new \InvalidArgumentException('delivery_time must be none, default or custom (or 0, 1, 2).');
+        $got = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        throw new \InvalidArgumentException('delivery_time must be none, default or custom (or 0, 1, 2); got ' . mb_substr((string) $got, 0, 60));
     }
 
     /**

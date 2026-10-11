@@ -237,10 +237,13 @@ class PreviewBuilder
 
                 return [self::listText($value), $error, null];
             case 'delivery_time':
-                $text = self::display($value);
-                $valid = is_scalar($value) && !is_bool($value) && in_array(strtolower(trim((string) $value)), ['none', 'default', 'custom', '0', '1', '2'], true);
+                try {
+                    NativeFields::deliveryTime($value);
+                } catch (\InvalidArgumentException $e) {
+                    return [self::display($value), $e->getMessage(), null];
+                }
 
-                return [$text, $valid ? null : 'delivery_time must be none, default or custom', null];
+                return [self::display($value), null, null];
             case 'meta_title':
             case 'meta_description':
                 $limit = $target === 'meta_title' ? self::META_TITLE_LIMIT : self::META_DESCRIPTION_LIMIT;
