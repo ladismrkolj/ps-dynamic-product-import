@@ -202,6 +202,33 @@
       output.setAttribute('aria-live', 'polite');
       controls.appendChild(label);
       controls.appendChild(button);
+      var allButton = document.createElement('button');
+      allButton.type = 'button';
+      allButton.className = 'btn btn-outline-secondary btn-default';
+      allButton.textContent = 'All values';
+      controls.appendChild(allButton);
+      var allHolder = document.createElement('div');
+      allHolder.style.flexBasis = '100%';
+      controls.appendChild(allHolder);
+      allButton.addEventListener('click', function () {
+        if (allHolder.firstChild) { allHolder.replaceChildren(); allButton.textContent = 'All values'; return; }
+        if (!textarea.value.trim()) { allHolder.textContent = 'Write an expression first'; return; }
+        var variantsExpr = variantRows ? variantsExpression().trim() : '';
+        if (variantRows && variantsExpr === '') { allHolder.textContent = 'Choose a variants list first'; return; }
+        var panel = PiStaging.valuesPanel({load: function (onlyFiltered) {
+          var body = feedBody('fieldValues', false);
+          body.set('expression', textarea.value);
+          if (variantRows) body.set('variants_expression', variantsExpr);
+          if (onlyFiltered) { body.set('only_filtered', '1'); body.set('filter_expression', form.querySelector('[name="filter_expression"]').value); }
+          return post(body).then(function (data) {
+            if (data.error) throw new Error(data.error);
+            if (data.errors.length) data.empty = (data.empty || 0);
+            data.values.forEach(function (v) { v.value = String(v.value); });
+            return data;
+          });
+        }});
+        allHolder.appendChild(panel.el); panel.load(); allButton.textContent = 'Hide values';
+      });
       controls.appendChild(output);
       cell.appendChild(controls);
       button.addEventListener('click', function () {

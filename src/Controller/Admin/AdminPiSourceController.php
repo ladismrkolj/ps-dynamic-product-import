@@ -32,7 +32,7 @@ class AdminPiSourceController extends ModuleAdminController
 
     public function postProcess()
     {
-        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'featureMappings' => 'ajaxProcessFeatureMappings', 'discoverFeatures' => 'ajaxProcessDiscoverFeatures', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
+        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'featureMappings' => 'ajaxProcessFeatureMappings', 'discoverFeatures' => 'ajaxProcessDiscoverFeatures', 'fieldValues' => 'ajaxProcessFieldValues', 'featureValues' => 'ajaxProcessFeatureValues', 'featureResults' => 'ajaxProcessFeatureResults', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
         $action = Tools::getValue('action');
         if ($this->ajax && is_string($action) && isset($actions[$action])) {
             $this->{$actions[$action]}();
@@ -608,6 +608,93 @@ class AdminPiSourceController extends ModuleAdminController
         } catch (Throwable $error) {
             $this->sendJson(['error' => $error->getMessage()]);
         }
+    }
+
+    /** Every distinct result of the posted (unsaved) field formula over the whole cached feed. No writes. */
+    public function ajaxProcessFieldValues()
+    {
+        try {
+            $this->editorContext();
+            $expression = $_POST['expression'] ?? null;
+            if (!is_string($expression) || trim($expression) === '') {
+                throw new InvalidArgumentException('Map a source field first.');
+            }
+            $variants = $_POST['variants_expression'] ?? null;
+            if ($variants !== null && (!is_string($variants) || trim($variants) === '')) {
+                throw new InvalidArgumentException('Choose a variants list first.');
+            }
+            $filter = ($_POST['only_filtered'] ?? '') === '1' && is_string($_POST['filter_expression'] ?? null) && trim($_POST['filter_expression']) !== '' ? $_POST['filter_expression'] : null;
+            $items = $this->cachedFeed($this->feedInput())['items'];
+            $result = (new \ProductImport\Service\ValueCatalog())->scanField($items, $expression, $variants === null ? null : trim($variants), $filter);
+        } catch (Throwable $error) {
+            $result = ['error' => $error->getMessage()];
+        }
+        $this->sendJson($result);
+    }
+
+    /** @return array{0: array, 1: ?string, 2: ?string, 3: ?string, 4: ?string} source, product, variants and variant features expressions, filter (saved) */
+    private function featureExpressions(bool $onlyFiltered): array
+    {
+        $source = $this->featureSource('edit');
+        $mapping = json_decode((string) $source['field_mapping'], true);
+        $product = is_array($mapping) && is_string($mapping['features'] ?? null) && trim($mapping['features']) !== '' ? $mapping['features'] : null;
+        $variant = json_decode((string) ($source['variant_mapping'] ?? ''), true);
+        $variants = is_array($variant) && is_string($variant['variants_expression'] ?? null) && trim($variant['variants_expression']) !== '' ? $variant['variants_expression'] : null;
+        $vf = is_array($variant) && is_string($variant['fields']['features'] ?? null) && trim($variant['fields']['features']) !== '' ? $variant['fields']['features'] : null;
+        $filter = $onlyFiltered && is_string($source['filter_expression'] ?? null) && trim($source['filter_expression']) !== '' ? $source['filter_expression'] : null;
+
+        return [$source, $product, $variants, $vf, $filter];
+    }
+
+    /** All raw values of one feed feature name over the whole cached feed (saved formulas). */
+    public function ajaxProcessFeatureValues()
+    {
+        try {
+            [$source, $product, $variants, $vf, $filter] = $this->featureExpressions(Tools::getValue('only_filtered') === '1');
+            $name = Tools::getValue('name');
+            if (!is_string($name) || $name === '') {
+                throw new InvalidArgumentException('Unknown feed feature.');
+            }
+            if ($product === null && ($variants === null || $vf === null)) {
+                throw new InvalidArgumentException('Save a features expression first.');
+            }
+            $result = (new \ProductImport\Service\ValueCatalog())->scanFeature($this->cachedFeed($source)['items'], $name, $product, $variants, $vf, $filter);
+        } catch (Throwable $error) {
+            $result = ['error' => $error->getMessage()];
+        }
+        $this->sendJson($result);
+    }
+
+    /** The posted (unsaved) value formula applied to the posted raw values; no writes. */
+    public function ajaxProcessFeatureResults()
+    {
+        try {
+            $source = $this->featureSource('edit');
+            $values = Tools::getValue('values');
+            $values = is_string($values) ? json_decode($values, true) : null;
+            if (!is_array($values) || count($values) > 300) {
+                throw new InvalidArgumentException('Invalid values.');
+            }
+            $formula = trim((string) Tools::getValue('formula', ''));
+            $evaluator = new \ProductImport\Service\ExpressionEvaluator();
+            if ($formula !== '' && ($problem = $evaluator->lint($formula, ['value', 'fields'])) !== null) {
+                throw new InvalidArgumentException('Value formula: ' . $problem);
+            }
+            $repository = new \ProductImport\Repository\FeatureMappingRepository();
+            $idLang = (int) $source['id_lang_default'];
+            $idFeature = ctype_digit((string) Tools::getValue('feature')) ? (int) Tools::getValue('feature') : null;
+            $createName = trim((string) Tools::getValue('create_name', ''));
+            $idFeature ??= $createName !== '' ? $repository->findIdByName($createName, $idLang) : null;
+            $existing = $idFeature !== null ? $repository->findNormalizedValues($idFeature, $idLang) : [];
+            $results = [];
+            foreach ($values as $value) {
+                $results[] = \ProductImport\Service\ValueCatalog::result((string) $value, $formula === '' ? null : static fn (string $v) => $evaluator->evaluate($formula, ['value' => $v, 'fields' => []]), $existing);
+            }
+            $result = ['results' => $results, 'target' => $idFeature !== null];
+        } catch (Throwable $error) {
+            $result = ['error' => $error->getMessage()];
+        }
+        $this->sendJson($result);
     }
 
     /** Records the feed's feature names with product counts and samples, from the saved `features` expression over the whole feed. */

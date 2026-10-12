@@ -70,6 +70,73 @@
           count: function (shown, total) { count.textContent = shown + ' of ' + total + ' shown'; }
         };
       },
+      // "All values" panel: opts.load(onlyFiltered) -> Promise of a scan; opts.results(values) -> Promise of results (features); opts.origin shows P/V.
+      valuesPanel: function (opts) {
+        var el = document.createElement('div'); el.className = 'pi-values';
+        var bar = document.createElement('div'); bar.className = 'pi-tb-row';
+        var search = document.createElement('input'); search.type = 'search'; search.className = 'form-control pi-grow'; search.placeholder = 'Search values'; search.setAttribute('aria-label', 'Search values');
+        var sort = document.createElement('select'); sort.className = 'form-control'; sort.setAttribute('aria-label', 'Sort values');
+        sort.add(new Option('Most frequent first', 'count')); sort.add(new Option('A to Z', 'value'));
+        var lab = document.createElement('label'); lab.style.margin = '0'; lab.style.fontWeight = 'normal';
+        var only = document.createElement('input'); only.type = 'checkbox'; lab.appendChild(only); lab.appendChild(document.createTextNode(' Only items passing the filter'));
+        var info = document.createElement('span'); info.className = 'pi-count'; info.setAttribute('aria-live', 'polite');
+        bar.appendChild(search); bar.appendChild(sort); bar.appendChild(lab); bar.appendChild(info);
+        var body = document.createElement('div'); el.appendChild(bar); el.appendChild(body);
+        var data = null, shown = 200, timer = null, token = 0, results = {};
+        function visible() {
+          var q = search.value.trim().toLowerCase();
+          var list = data.values.filter(function (v) { return !q || (v.value + ' ' + v.also.map(function (a) { return a.value; }).join(' ')).toLowerCase().indexOf(q) !== -1; });
+          if (sort.value === 'value') list = list.slice().sort(function (a, b) { return a.value.localeCompare(b.value); });
+          return list;
+        }
+        function draw() {
+          if (!data) return;
+          var list = visible(), part = list.slice(0, shown);
+          body.replaceChildren();
+          var notes = [data.distinct_total + ' distinct values' + (data.distinct_total > data.values.length ? ' (first ' + data.values.length + ' by frequency)' : '') + ', ' + data.items_scanned + ' products scanned'];
+          if (data.empty) notes.push(data.empty + ' empty');
+          if (data.truncated) notes.push('truncated after ' + data.evaluations + ' evaluations');
+          info.textContent = notes.join(' · ');
+          var table = document.createElement('table'); table.className = 'table pi-map-table pi-values-table';
+          var head = table.createTHead().insertRow();
+          ['Value', 'Products'].concat(opts.results ? ['P / V', 'Result'] : []).forEach(function (t) { var th = document.createElement('th'); th.textContent = t; head.appendChild(th); });
+          var tb = table.createTBody();
+          part.forEach(function (v) {
+            var tr = tb.insertRow();
+            var c = tr.insertCell(); c.setAttribute('data-label', 'Value'); var strong = document.createElement('span'); strong.className = 'pi-row-title'; strong.textContent = v.value; c.appendChild(strong);
+            if (v.also.length) { var also = document.createElement('div'); also.className = 'pi-row-meta'; also.textContent = 'also: ' + v.also.map(function (a) { return a.value + ' (' + a.count + ')'; }).join(' · '); also.title = also.textContent; c.appendChild(also); }
+            var n = tr.insertCell(); n.setAttribute('data-label', 'Products'); n.textContent = v.count;
+            if (opts.results) {
+              var pv = tr.insertCell(); pv.setAttribute('data-label', 'P / V'); pv.textContent = (v.p ? 'P ' + v.p : '') + (v.p && v.v ? ' · ' : '') + (v.v ? 'V ' + v.v : '');
+              var rc = tr.insertCell(); rc.setAttribute('data-label', 'Result'); var r = results[v.value];
+              if (!r) rc.textContent = '…';
+              else if (r.kind === 'skipped') rc.appendChild(PiStaging.badge('skipped', 'warn'));
+              else if (r.kind === 'error') { rc.appendChild(PiStaging.badge('error', 'bad')); var e = document.createElement('div'); e.className = 'pi-row-meta'; e.textContent = r.text; rc.appendChild(e); }
+              else { rc.appendChild(document.createTextNode(r.text)); if (r.match) rc.appendChild(PiStaging.badge('matches existing value', 'ok')); }
+            }
+          });
+          body.appendChild(table);
+          if (data.errors && data.errors.length) { var det = document.createElement('details'); var sm = document.createElement('summary'); sm.textContent = 'Errors (' + data.errors.reduce(function (a, e) { return a + e.count; }, 0) + ')'; det.appendChild(sm); data.errors.forEach(function (e) { var d = document.createElement('div'); d.textContent = e.count + ' × ' + e.message; det.appendChild(d); }); body.appendChild(det); }
+          if (list.length > shown) body.appendChild(PiStaging.more(list.length, shown, function () { shown += 200; draw(); evaluate(); }));
+        }
+        function evaluate() {
+          if (!opts.results || !data) return;
+          var mine = ++token, vals = visible().slice(0, shown).map(function (v) { return v.value; });
+          opts.results(vals).then(function (res) {
+            if (mine !== token) return;
+            vals.forEach(function (v, i) { results[v] = res[i]; });
+            draw();
+          }).catch(function (error) { if (mine === token) info.textContent = error.message; });
+        }
+        function load() {
+          info.textContent = 'Scanning the whole feed…'; body.replaceChildren(); results = {}; shown = 200;
+          opts.load(only.checked).then(function (d) { data = d; draw(); evaluate(); }).catch(function (error) { info.textContent = error.message; });
+        }
+        search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(function () { shown = 200; draw(); evaluate(); }, 150); });
+        sort.addEventListener('change', function () { draw(); evaluate(); });
+        only.addEventListener('change', load);
+        return {el: el, load: load, refresh: function () { clearTimeout(timer); timer = setTimeout(function () { results = {}; evaluate(); }, 400); }};
+      },
       more: function (total, shown, onMore) {
         var box = document.createElement('div'); box.className = 'pi-more';
         var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-outline-secondary btn-default'; b.textContent = 'Show more (' + (total - shown) + ' left)';

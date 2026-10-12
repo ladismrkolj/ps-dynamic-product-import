@@ -135,3 +135,9 @@ table.pi_import_run .pi-log pre { white-space: pre-wrap; max-width: 90ch; overfl
 #pi-general .form-group > label.control-label { width: 100% !important; max-width: none !important; float: none; white-space: normal; padding-right: 0; }
 #pi-general .form-group > div[class*="col-"] { width: 100% !important; max-width: 760px !important; float: none; margin-left: 0; padding-left: 0; padding-right: 0; }
 #pi-grid-root .pi-formula-box button { white-space: nowrap; }
+.pi-values { margin: var(--pi-s3) 0; padding: var(--pi-s3); border: 1px solid var(--pi-border); border-radius: 6px; background: #fff; }
+.pi-values .pi-tb-row { margin-bottom: var(--pi-s3); }
+.pi-values-table { width: 100%; table-layout: auto !important; }
+.pi-values-table td, .pi-values-table th { overflow-wrap: anywhere; vertical-align: top; padding: 6px 8px; }
+#pi-grid-root .pi-values .pi-grow { min-width: 160px; }
+.pi-values .pi-tb-row .form-control { width: auto; } .pi-values .pi-tb-row .pi-grow { flex: 1 1 220px; }

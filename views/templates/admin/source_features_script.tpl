@@ -210,8 +210,24 @@
         toggle();
         controls.appendChild(select); controls.appendChild(createName); controls.appendChild(expression);
         var flag = element('span');
+        var valuesBtn = element('button', 'btn btn-link btn-sm', 'All values'); valuesBtn.type = 'button';
+        var valuesRow = null, panel = null;
+        valuesBtn.addEventListener('click', function () {
+          if (valuesRow) { valuesRow.remove(); valuesRow = null; panel = null; valuesBtn.textContent = 'All values'; return; }
+          valuesRow = document.createElement('tr'); var vc = valuesRow.insertCell(); vc.colSpan = 4;
+          panel = PiStaging.valuesPanel({
+            load: function (onlyFiltered) { return post('featureValues', {name: row.key, only_filtered: onlyFiltered ? '1' : '0'}); },
+            results: function (vals) {
+              var rule = current();
+              return post('featureResults', {values: JSON.stringify(vals), formula: expression.value, feature: rule.rule_action === 'map' ? rule.feature : '', create_name: rule.rule_action === 'create' ? createName.value : ''}).then(function (d) { return d.results; });
+            }
+          });
+          vc.appendChild(panel.el); tr.parentNode.insertBefore(valuesRow, tr.nextSibling); panel.load(); valuesBtn.textContent = 'Hide values';
+        });
+        expression.addEventListener('input', function () { if (panel) panel.refresh(); });
+        select.addEventListener('change', function () { if (panel) panel.refresh(); });
         var undo = element('button', 'btn btn-link btn-sm', 'Undo'); undo.type = 'button'; undo.title = 'Back to the saved state';
-        var line = element('div'); line.appendChild(flag); line.appendChild(undo); controls.appendChild(line);
+        var line = element('div'); line.appendChild(flag); line.appendChild(undo); line.appendChild(valuesBtn); controls.appendChild(line);
         var remove = element('button', 'btn btn-outline-danger btn-sm', 'Delete');
         remove.type = 'button';
         function savedToken() { return row.action === 'map' && row.id_feature != null ? 'map:' + row.id_feature : (row.action === 'ignore' || row.action === 'create' ? row.action : 'none'); }

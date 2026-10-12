@@ -165,6 +165,24 @@ class FeatureMappingRepository
     }
 
     /** @return array<int,string> id_feature => name for the names equal to $name (collation-insensitive; callers compare exactly) */
+    /** @return array<string,true> normalised predefined values of a feature in the language */
+    public function findNormalizedValues(int $idFeature, int $idLang): array
+    {
+        $rows = \Db::getInstance()->executeS(
+            'SELECT vl.`value` FROM `' . _DB_PREFIX_ . 'feature_value` v INNER JOIN `' . _DB_PREFIX_ . 'feature_value_lang` vl ON vl.`id_feature_value` = v.`id_feature_value`'
+            . ' WHERE v.`id_feature` = ' . (int) $idFeature . ' AND (v.`custom` IS NULL OR v.`custom` = 0) AND vl.`id_lang` = ' . (int) $idLang
+        );
+        if ($rows === false) {
+            throw new \RuntimeException(DbError::message('Unable to read feature values'));
+        }
+        $set = [];
+        foreach ($rows as $row) {
+            $set[\ProductImport\Service\FeatureValueMatcher::normalize((string) $row['value'])] = true;
+        }
+
+        return $set;
+    }
+
     public function findNamesLike(string $name, int $idLang): array
     {
         $rows = \Db::getInstance()->executeS(
