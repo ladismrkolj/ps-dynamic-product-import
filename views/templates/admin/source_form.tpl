@@ -104,6 +104,8 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
   </div>
 </div>
 {include file='./source_tabs_script.tpl'}
+<input type="hidden" id="pi-staged" name="pi_staged" value="{$pi_staged_json|escape:'html':'UTF-8'}">
+{include file='./source_staging_script.tpl'}
 {include file='./source_mappings_script.tpl'}
 {include file='./source_features_script.tpl'}
 {include file='./source_editor_script.tpl'}

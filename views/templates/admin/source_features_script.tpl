@@ -21,6 +21,7 @@
       if (text !== undefined) node.textContent = text;
       return node;
     }
+    function unsaved(text) { var node = element('span', 'label label-warning', text || 'unsaved'); node.style.marginLeft = '6px'; return node; }
     function live() { var node = element('span'); node.setAttribute('aria-live', 'polite'); return node; }
 
     // The existing features are a long list: build the options only when the select is first opened.
@@ -69,21 +70,21 @@
     }
 
     function render(data, notice) {
-      pane.appendChild(element('p', '', data.rows.length + ' listed. Each feed feature name can be ignored, mapped to an existing shop feature, or created as a feature of the name you choose (it is then connected to that feature). A name without a mapping follows the source setting below. Several feed names, or several sources, may map to the same shop feature; for one product the first feed name in feed order wins and the conflict is logged. Values are matched to the existing values of the shop feature ignoring case and repeated or edge spaces before a new value is created. The optional value formula uses value and fields; a null or empty result skips the feature for that product, for example value == \'TBA\' ? null : value. Changes here are saved immediately, independent of the main Save button. Imports add the feed names they find; Discover scans the whole feed (ignoring the filter) using the saved features formula.'));
+      pane.appendChild(element('p', '', data.rows.length + ' listed. Each feed feature name can be ignored, mapped to an existing shop feature, or created as a feature of the name you choose (it is then connected to that feature). A name without a mapping follows the source setting below. Several feed names, or several sources, may map to the same shop feature; for one product the first feed name in feed order wins and the conflict is logged. Values are matched to the existing values of the shop feature ignoring case and repeated or edge spaces before a new value is created. The optional value formula uses value and fields; a null or empty result skips the feature for that product, for example value == \'TBA\' ? null : value. Changes here are staged and saved together with the form when you press Save. Discover only records names and runs at once. Imports add the feed names they find; Discover scans the whole feed (ignoring the filter) using the saved features formula.'));
 
       var setting = element('label', '', 'Feed names without a mapping ');
       var settingSelect = element('select', 'form-control');
       settingSelect.style.maxWidth = '420px';
       settingSelect.add(new Option('Ignore (not imported)', 'ignore'));
       settingSelect.add(new Option('Create a feature with the feed name', 'create'));
-      settingSelect.value = data.setting;
+      var part = PiStaging.part('feature');
+      settingSelect.value = Object.prototype.hasOwnProperty.call(part, 'setting') ? part.setting : data.setting;
       var settingIndicator = live();
+      function showSetting() { settingIndicator.replaceChildren(); if (Object.prototype.hasOwnProperty.call(part, 'setting')) settingIndicator.appendChild(unsaved()); }
+      showSetting();
       settingSelect.addEventListener('change', function () {
-        settingSelect.disabled = true; settingIndicator.textContent = 'Saving…';
-        post('saveFeatureSetting', {value: settingSelect.value})
-          .then(function () { settingIndicator.textContent = 'Saved'; load(); })
-          .catch(function (error) { settingIndicator.textContent = error.message; })
-          .then(function () { settingSelect.disabled = false; });
+        if (settingSelect.value === data.setting) delete part.setting; else part.setting = settingSelect.value;
+        showSetting(); PiStaging.changed();
       });
       setting.appendChild(settingSelect); setting.appendChild(settingIndicator);
       pane.appendChild(setting);
@@ -114,16 +115,24 @@
       var body = table.createTBody();
       data.rows.forEach(function (row) {
         var tr = body.insertRow();
+        var staged = part.rules[row.key];
+        var eff = {action: row.action, id_feature: row.id_feature, create_name: row.create_name, value_expression: row.value_expression};
+        if (staged) {
+          eff.action = staged.rule_action;
+          eff.id_feature = staged.feature ? Number(staged.feature) : null;
+          eff.create_name = staged.create_name;
+          eff.value_expression = staged.value_expression;
+        }
         var name = tr.insertCell(); name.textContent = row.key;
         if (!row.seen) name.appendChild(element('span', 'label label-warning', 'not seen yet')).style.marginLeft = '6px';
         tr.insertCell().textContent = row.count ? String(row.count) : '';
         var samples = tr.insertCell(); samples.className = 'pi-feature-samples'; samples.textContent = row.samples.join(' | '); samples.title = row.samples.join(' | ');
         var actionCell = tr.insertCell();
-        var select = actionSelect(row, data.options);
+        var select = actionSelect(eff, data.options);
         select.setAttribute('aria-label', 'Action for ' + row.key);
         var createName = element('input', 'form-control pi-feature-create');
         createName.type = 'text'; createName.maxLength = 128;
-        createName.value = row.create_name || row.key;
+        createName.value = eff.create_name || row.key;
         createName.setAttribute('aria-label', 'Name of the feature to create for ' + row.key);
         createName.title = 'Name of the feature to create';
         createName.style.marginTop = '4px';
@@ -132,42 +141,51 @@
         actionCell.appendChild(select); actionCell.appendChild(createName);
         var expressionCell = tr.insertCell();
         var expression = element('input', 'form-control pi-feature-formula');
-        expression.type = 'text'; expression.value = row.value_expression || '';
+        expression.type = 'text'; expression.value = eff.value_expression || '';
         expression.placeholder = 'optional: formula of value and fields';
         expression.setAttribute('aria-label', 'Value formula for ' + row.key);
         expressionCell.appendChild(expression);
         var status = tr.insertCell(); status.className = 'pi-feature-status'; status.textContent = row.status; status.title = row.status;
-        var indicator = live(); expressionCell.appendChild(indicator);
-        // Saves of one row run strictly in order, each sending the controls' state at that moment: the last change wins.
-        var chain = Promise.resolve();
-        function save() {
-          indicator.textContent = 'Saving…';
-          chain = chain.then(function () {
-            var values = {key: row.key, rule_action: select.value.indexOf('map:') === 0 ? 'map' : select.value, value_expression: expression.value};
-            if (values.rule_action === 'map') values.feature = select.value.slice(4);
-            if (values.rule_action === 'create') values.create_name = createName.value;
-            return post('saveFeatureRule', values).then(function (result) {
-              indicator.textContent = 'Saved'; status.textContent = result.status; status.title = result.status;
-            }).catch(function (error) { indicator.textContent = error.message; });
-          });
+        var flag = element('span'); expressionCell.appendChild(flag);
+        var remove = element('button', 'btn btn-default btn-sm', 'Delete');
+        remove.type = 'button';
+        function current() {
+          var action = select.value.indexOf('map:') === 0 ? 'map' : select.value;
+          return {rule_action: action, feature: action === 'map' ? select.value.slice(4) : '', create_name: action === 'create' ? createName.value : '', value_expression: expression.value.trim()};
         }
-        select.addEventListener('change', function () { toggle(); save(); });
-        createName.addEventListener('change', save);
-        expression.addEventListener('change', save);
+        function untouched(rule) {
+          var feature = row.action === 'map' && row.id_feature != null ? String(row.id_feature) : '';
+          var action = ['ignore', 'create', 'map'].indexOf(row.action) !== -1 ? row.action : 'none';
+          return rule.rule_action === action && rule.feature === feature && rule.create_name === (action === 'create' ? (row.create_name || '') : '') && rule.value_expression === (row.value_expression || '');
+        }
+        function show() {
+          var deleting = part.del.indexOf(row.key) !== -1;
+          flag.replaceChildren();
+          if (deleting) flag.appendChild(unsaved('will be deleted')); else if (part.rules[row.key]) flag.appendChild(unsaved());
+          if (part.rules[row.key] || deleting) { status.textContent = deleting ? 'will be deleted when you press Save' : 'changed, saved when you press Save'; status.title = status.textContent; }
+          name.style.textDecoration = deleting ? 'line-through' : '';
+          [select, createName, expression].forEach(function (control) { control.disabled = deleting; });
+          remove.textContent = deleting ? 'Undo delete' : 'Delete';
+          remove.setAttribute('aria-label', (deleting ? 'Undo delete of row ' : 'Delete row ') + row.key);
+        }
+        function stage() {
+          var rule = current();
+          if (untouched(rule)) delete part.rules[row.key]; else part.rules[row.key] = rule;
+          show(); PiStaging.changed();
+        }
+        select.addEventListener('change', function () { toggle(); stage(); });
+        createName.addEventListener('input', stage);
+        expression.addEventListener('input', stage);
         [createName, expression].forEach(function (input) {
           input.addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); input.blur(); } });
         });
-        var remove = element('button', 'btn btn-default btn-sm', 'Delete');
-        remove.type = 'button';
-        remove.setAttribute('aria-label', 'Delete row ' + row.key);
         remove.addEventListener('click', function () {
-          if (!window.confirm('Delete the row for "' + row.key + '"? If the feed still contains it, it reappears as not mapped the next time the feed is read.')) return;
-          remove.disabled = true;
-          post('deleteFeatureRule', {key: row.key})
-            .then(function () { load(); })
-            .catch(function (error) { indicator.textContent = error.message; remove.disabled = false; });
+          var at = part.del.indexOf(row.key);
+          if (at === -1) part.del.push(row.key); else part.del.splice(at, 1);
+          show(); PiStaging.changed();
         });
         tr.insertCell().appendChild(remove);
+        show();
       });
       pane.appendChild(table);
     }

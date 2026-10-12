@@ -10,6 +10,9 @@
 #pi-grid-root table td, #pi-grid-root table th { vertical-align: top; }
 #pi-grid-root .pi-partial td:first-child { background: #fff8e1; }
 #pi-grid-root .pi-samples { color: #555; word-break: break-word; }
+#pi-grid-root .pi-map { width: 100%; table-layout: fixed; }
+#pi-grid-root .pi-map th:first-child, #pi-grid-root .pi-map td:first-child { width: 34%; }
+#pi-grid-root .pi-map td:nth-child(2) select, #pi-grid-root .pi-map td:nth-child(2) input[type=text] { width: 100%; min-width: 320px; }
 #pi-grid-root .pi-map select { max-width: 100%; }
 #pi-grid-root .pi-map textarea { width: 100%; }
 #pi-grid-root .pi-map .pi-target-help { display: block; color: #666; margin-top: 2px; }

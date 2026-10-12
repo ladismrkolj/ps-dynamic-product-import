@@ -3,9 +3,9 @@
 (function () {
   function init() {
     var source = document.getElementById('pi-preview');
-    var form = source.closest('form');
     var id = Number(source.dataset.source);
     var states = {};
+    var NOT_MAPPED = 'Not mapped (default, else find or create, then connect)';
     function post(action, type, values) {
       var body = new URLSearchParams({ajax: '1', action: action, id_source: String(id), type: type});
       Object.keys(values || {}).forEach(function (key) { body.set(key, values[key]); });
@@ -16,7 +16,7 @@
     function select(options, value, empty) {
       var element = document.createElement('select');
       element.className = 'form-control';
-      element.add(new Option(value == null ? empty : (options.find(function (option) { return Number(option.id) === Number(value); }) || {}).label || 'Unavailable #' + value, value == null ? '' : String(value)));
+      element.add(new Option(value == null || value === '' ? empty : (options.find(function (option) { return Number(option.id) === Number(value); }) || {}).label || 'Unavailable #' + value, value == null ? '' : String(value)));
       function expand() {
         if (element.dataset.expanded) return;
         element.dataset.expanded = '1';
@@ -31,7 +31,7 @@
       element.addEventListener('keydown', function (event) { if (event.key === 'Enter') event.preventDefault(); else expand(); });
       return element;
     }
-    // Every reload takes a token; only the newest response renders, so overlapping loads never drop or clobber each other.
+    function badge(text) { var node = document.createElement('span'); node.className = 'label label-warning'; node.textContent = text; node.style.marginLeft = '6px'; return node; }
     function load(type, notice) {
       var state = states[type];
       if (!id) return;
@@ -41,86 +41,105 @@
         if (token !== state.token) return;
         state.loaded = true;
         state.pane.replaceChildren();
-        var help = document.createElement('p');
-        help.textContent = data.rows.length + ' listed. A value without a mapping is resolved by the next import (the source default if one is set, otherwise an existing ' + (type === 'category' ? 'category with the same name path, or a new one' : 'brand with the same name, or a new one') + ') and the result is stored here as its mapping. Choose the empty option to clear a mapping so the next import resolves it again. Changes here are saved immediately, independent of the main Save button. The feed is read automatically when the source settings change; rows appear here once the feed contains them.';
-        state.pane.appendChild(help);
-        var label = document.createElement('label'); label.textContent = 'Default for anything not mapped below';
-        state.pane.appendChild(label);
-        var defaultSelect = select(data.options, data.default, 'No default (find or create, then connect)');
-        label.appendChild(defaultSelect);
-        function save(control, action, key, indicator, status) {
-          control.addEventListener('change', function () {
-            var value = control.value;
-            control.disabled = true; indicator.textContent = 'Saving…';
-            post(action, type, key == null ? {value: value} : {key: key, value: value})
-              .then(function (result) {
-                indicator.textContent = 'Saved';
-                if (status) status.textContent = result.status;
-                if (action === 'saveDefault') load(type);
-              })
-              .catch(function (error) { indicator.textContent = error.message; })
-              .then(function () { control.disabled = false; });
-          });
-        }
-        var defaultIndicator = document.createElement('span'); defaultIndicator.setAttribute('aria-live', 'polite'); label.appendChild(defaultIndicator);
-        save(defaultSelect, 'saveDefault', null, defaultIndicator, null);
-
-        var add = document.createElement('div'); add.className = 'form-inline'; add.style.margin = '10px 0';
-        var addText = document.createElement('input'); addText.type = 'text'; addText.className = 'form-control'; addText.style.minWidth = '260px';
-        addText.placeholder = type === 'category' ? 'Feed category, e.g. Sports > Sails' : 'Feed brand name';
-        addText.setAttribute('aria-label', type === 'category' ? 'Feed category path to add' : 'Feed brand name to add');
-        var addSelect = select(data.options, null, 'Not mapped (default, else find or create, then connect)');
-        addSelect.setAttribute('aria-label', 'Destination for the new row');
-        var addButton = document.createElement('button'); addButton.type = 'button'; addButton.className = 'btn btn-default'; addButton.textContent = 'Add row';
-        var addIndicator = document.createElement('span'); addIndicator.setAttribute('aria-live', 'polite');
-        addText.addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); addButton.click(); } });
-        addButton.addEventListener('click', function () {
-          addButton.disabled = true; addIndicator.textContent = 'Adding…';
-          post('addMapping', type, {label: addText.value, value: addSelect.value})
-            .then(function () { load(type, 'Added.'); })
-            .catch(function (error) { addIndicator.textContent = error.message; })
-            .then(function () { addButton.disabled = false; });
-        });
-        [addText, addSelect, addButton, addIndicator].forEach(function (element) { add.appendChild(element); add.appendChild(document.createTextNode(' ')); });
-        state.pane.appendChild(add);
-        if (notice) { addIndicator.textContent = notice; setTimeout(function () { if (addIndicator.textContent === notice) addIndicator.textContent = ''; }, 3000); }
-
-        if (!data.rows.length) {
-          var empty = document.createElement('p');
-          empty.textContent = 'No rows yet. Add one above, or load the feed (set the ' + (type === 'category' ? 'category_paths' : 'manufacturer') + ' mapping on the Product fields tab and save).';
-          state.pane.appendChild(empty); return;
-        }
-        var table = document.createElement('table'); table.className = 'table';
-        var header = table.createTHead().insertRow();
-        ['Feed value', 'In feed', 'Current status', 'Destination', ''].forEach(function (title) { var cell = document.createElement('th'); cell.textContent = title; header.appendChild(cell); });
-        var body = table.createTBody();
-        data.rows.forEach(function (row) {
-          var tr = body.insertRow(); tr.insertCell().textContent = row.label;
-          var badge = document.createElement('span');
-          badge.className = 'label ' + (row.seen ? 'label-success' : 'label-warning');
-          badge.textContent = row.seen ? 'seen in feed ' + row.seen : 'not seen yet';
-          tr.insertCell().appendChild(badge);
-          var status = tr.insertCell(); status.textContent = row.status;
-          var cell = tr.insertCell();
-          var control = select(data.options, row.id, 'Not mapped (default, else find or create, then connect)');
-          control.setAttribute('aria-label', 'Destination for ' + row.label);
-          cell.appendChild(control);
-          var indicator = document.createElement('span'); indicator.setAttribute('aria-live', 'polite'); cell.appendChild(indicator);
-          save(control, 'saveMapping', row.key, indicator, status);
-          var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm'; remove.textContent = 'Delete';
-          remove.setAttribute('aria-label', 'Delete row ' + row.label);
-          remove.addEventListener('click', function () {
-            if (!window.confirm('Delete the row for "' + row.label + '"? If the feed still contains it, it reappears as not mapped the next time the feed is read.')) return;
-            remove.disabled = true;
-            post('deleteMapping', type, {key: row.key})
-              .then(function () { load(type); })
-              .catch(function (error) { indicator.textContent = error.message; remove.disabled = false; });
-          });
-          var actions = tr.insertCell();
-          actions.appendChild(remove);
-        });
-        state.pane.appendChild(table);
+        render(type, state, data, notice);
       }).catch(function (error) { if (token === state.token) state.pane.textContent = error.message; });
+    }
+    function render(type, state, data, notice) {
+      var part = PiStaging.part(type);
+      var help = document.createElement('p');
+      help.textContent = data.rows.length + ' listed. A value without a mapping is resolved by the next import (the source default if one is set, otherwise an existing ' + (type === 'category' ? 'category with the same name path, or a new one' : 'brand with the same name, or a new one') + ') and the result is stored here as its mapping. Choose the empty option to clear a mapping so the next import resolves it again. Changes here are staged and saved together with the form when you press Save. The feed is read automatically when the source settings change; rows appear here once the feed contains them.';
+      state.pane.appendChild(help);
+      var label = document.createElement('label'); label.textContent = 'Default for anything not mapped below';
+      state.pane.appendChild(label);
+      var original = data.default == null ? '' : String(data.default);
+      var current = Object.prototype.hasOwnProperty.call(part, 'default') ? part.default : original;
+      var defaultSelect = select(data.options, current, 'No default (find or create, then connect)');
+      label.appendChild(defaultSelect);
+      var defaultFlag = document.createElement('span'); defaultFlag.setAttribute('aria-live', 'polite'); label.appendChild(defaultFlag);
+      function showDefault() { defaultFlag.replaceChildren(); if (Object.prototype.hasOwnProperty.call(part, 'default')) defaultFlag.appendChild(badge('unsaved')); }
+      showDefault();
+      defaultSelect.addEventListener('change', function () {
+        if (defaultSelect.value === original) delete part.default; else part.default = defaultSelect.value;
+        showDefault(); PiStaging.changed();
+      });
+
+      var add = document.createElement('div'); add.className = 'form-inline'; add.style.margin = '10px 0';
+      var addText = document.createElement('input'); addText.type = 'text'; addText.className = 'form-control'; addText.style.minWidth = '260px';
+      addText.placeholder = type === 'category' ? 'Feed category, e.g. Sports > Sails' : 'Feed brand name';
+      addText.setAttribute('aria-label', type === 'category' ? 'Feed category path to add' : 'Feed brand name to add');
+      var addSelect = select(data.options, null, NOT_MAPPED);
+      addSelect.setAttribute('aria-label', 'Destination for the new row');
+      var addButton = document.createElement('button'); addButton.type = 'button'; addButton.className = 'btn btn-default'; addButton.textContent = 'Add row';
+      var addIndicator = document.createElement('span'); addIndicator.setAttribute('aria-live', 'polite');
+      addText.addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); addButton.click(); } });
+      addButton.addEventListener('click', function () {
+        if (!addText.value.trim()) { addIndicator.textContent = type === 'category' ? 'Enter the feed category path.' : 'Enter the feed brand name.'; return; }
+        part.add.push({label: addText.value.trim(), value: addSelect.value});
+        PiStaging.changed();
+        load(type, 'Added (unsaved).');
+      });
+      [addText, addSelect, addButton, addIndicator].forEach(function (element) { add.appendChild(element); add.appendChild(document.createTextNode(' ')); });
+      state.pane.appendChild(add);
+      if (notice) { addIndicator.textContent = notice; }
+
+      if (!data.rows.length && !part.add.length) {
+        var empty = document.createElement('p');
+        empty.textContent = 'No rows yet. Add one above, or load the feed (set the ' + (type === 'category' ? 'category_paths' : 'manufacturer') + ' mapping on the Product fields tab and save).';
+        state.pane.appendChild(empty); return;
+      }
+      var table = document.createElement('table'); table.className = 'table';
+      var header = table.createTHead().insertRow();
+      ['Feed value', 'In feed', 'Current status', 'Destination', ''].forEach(function (title) { var cell = document.createElement('th'); cell.textContent = title; header.appendChild(cell); });
+      var body = table.createTBody();
+      part.add.forEach(function (row, index) {
+        var tr = body.insertRow(); tr.insertCell().textContent = row.label;
+        tr.insertCell().appendChild(badge('new, unsaved'));
+        tr.insertCell().textContent = 'will be added when you press Save';
+        var control = select(data.options, row.value, NOT_MAPPED);
+        control.setAttribute('aria-label', 'Destination for ' + row.label);
+        control.addEventListener('change', function () { row.value = control.value; PiStaging.changed(); });
+        tr.insertCell().appendChild(control);
+        var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm'; remove.textContent = 'Remove';
+        remove.addEventListener('click', function () { part.add.splice(index, 1); PiStaging.changed(); load(type); });
+        tr.insertCell().appendChild(remove);
+      });
+      data.rows.forEach(function (row) {
+        var tr = body.insertRow(); var name = tr.insertCell(); name.textContent = row.label;
+        var badgeCell = tr.insertCell();
+        var seen = document.createElement('span');
+        seen.className = 'label ' + (row.seen ? 'label-success' : 'label-warning');
+        seen.textContent = row.seen ? 'seen in feed ' + row.seen : 'not seen yet';
+        badgeCell.appendChild(seen);
+        var status = tr.insertCell(); status.textContent = row.status;
+        var control = select(data.options, Object.prototype.hasOwnProperty.call(part.rows, row.key) ? part.rows[row.key] : row.id, NOT_MAPPED);
+        control.setAttribute('aria-label', 'Destination for ' + row.label);
+        var originalId = row.id == null ? '' : String(row.id);
+        var flag = document.createElement('span');
+        var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm';
+        function show() {
+          var deleting = part.del.indexOf(row.key) !== -1;
+          var changed = Object.prototype.hasOwnProperty.call(part.rows, row.key);
+          flag.replaceChildren();
+          if (deleting) flag.appendChild(badge('will be deleted')); else if (changed) flag.appendChild(badge('unsaved'));
+          name.style.textDecoration = deleting ? 'line-through' : '';
+          control.disabled = deleting;
+          remove.textContent = deleting ? 'Undo delete' : 'Delete';
+          remove.setAttribute('aria-label', (deleting ? 'Undo delete of row ' : 'Delete row ') + row.label);
+        }
+        control.addEventListener('change', function () {
+          if (control.value === originalId) delete part.rows[row.key]; else part.rows[row.key] = control.value;
+          show(); PiStaging.changed();
+        });
+        remove.addEventListener('click', function () {
+          var at = part.del.indexOf(row.key);
+          if (at === -1) part.del.push(row.key); else part.del.splice(at, 1);
+          show(); PiStaging.changed();
+        });
+        var cell = tr.insertCell(); cell.appendChild(control); cell.appendChild(flag);
+        tr.insertCell().appendChild(remove);
+        show();
+      });
+      state.pane.appendChild(table);
     }
     ['category', 'brand'].forEach(function (type) {
       var pane = document.getElementById(type === 'category' ? 'pi-category-mappings' : 'pi-brands');
@@ -132,11 +151,11 @@
       if (type && !states[type].loaded) load(type);
     });
     document.addEventListener('pi-feed-discovered', function () {
-      ['category', 'brand'].forEach(function (type) { load(type); });
+      ['category', 'brand'].forEach(function (type) { if (states[type].loaded) load(type); });
     });
     var active = document.querySelector('#pi-source-tabs > .tab-content > .tab-pane.active');
     if (active) document.dispatchEvent(new CustomEvent('pi-source-tab', {detail: active.id}));
-    form.addEventListener('keydown', function (event) {
+    document.getElementById('pi-preview').closest('form').addEventListener('keydown', function (event) {
       if (event.key === 'Enter' && event.target.closest('#pi-categories, #pi-brands')) event.preventDefault();
     });
   }

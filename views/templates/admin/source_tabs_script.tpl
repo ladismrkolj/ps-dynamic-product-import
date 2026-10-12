@@ -4,7 +4,7 @@
 #pi-source-tabs > .tab-content > .tab-pane { display: none; }
 #pi-source-tabs > .tab-content > .tab-pane.active { display: block; }
 #pi-source-tabs > .tab-content { padding-top: 16px; }
-/* The mapping tabs hold wide tables: let them use the full width of the form. */
+/* Every editor tab uses the full width of the form. */
 .pi-wide-tabs { width: 100% !important; margin-left: 0 !important; }
 #pi-features table { table-layout: auto; width: 100%; }
 #pi-features td, #pi-features th { vertical-align: top; }
@@ -30,7 +30,7 @@
     var config = document.getElementById('pi-configuration-panel');
     // Move existing nodes, never clone them: values, IDs, names and listeners survive.
     product.appendChild(config);
-    var controls = ['name', 'technical_key', 'location', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'id_lang_default', 'active', 'deactivate_missing', 'delete_missing_days'];
+    var controls = ['name', 'technical_key', 'location', 'source_format', 'xml_item_path', 'identifier_field', 'filter_expression', 'id_lang_default', 'id_supplier', 'active', 'deactivate_missing', 'delete_missing_days'];
     var selected = new Set();
     function selectGroup(element) {
       if (!element) return;
@@ -59,7 +59,8 @@
     var tree = document.getElementById('pi-root-category-tree');
     selectGroup(tree);
     if (tree) categoryRoot.appendChild(Array.from(wrapper.children).find(function (element) { return selected.has(element); }));
-    var wideColumn = tabs.parentElement;
+    // Every tab uses the full width of the form.
+    tabs.parentElement.classList.add('pi-wide-tabs');
     var links = Array.from(tabs.querySelectorAll('.nav-tabs a'));
     var panes = Array.from(tabs.querySelector('.tab-content').children);
     var storageKey = 'productimport-tab:' + location.pathname + ':' + document.getElementById('pi-preview').dataset.source;
@@ -72,7 +73,6 @@
         link.setAttribute('aria-selected', String(active));
         link.tabIndex = active ? 0 : -1;
       });
-      wideColumn.classList.toggle('pi-wide-tabs', ['pi-categories', 'pi-brands', 'pi-features'].indexOf(id) !== -1);
       document.dispatchEvent(new CustomEvent('pi-source-tab', {detail: id}));
       try { sessionStorage.setItem(storageKey, id); } catch (error) { /* Storage may be disabled. */ }
     }
