@@ -122,6 +122,9 @@ class PreviewBuilder
     public function table(array $source, array $items, int $limit = self::TABLE_LIMIT, ?callable $referenceOwner = null, ?array $carriers = null): array
     {
         $targets = array_keys($source['field_mapping']);
+        if (self::variantFeaturesExpression($source) !== null && !in_array('features', $targets, true)) {
+            $targets[] = 'features';
+        }
         $rows = [];
         $previewed = array_slice($items, 0, $limit, true);
         $identifier = is_string($source['identifier_field'] ?? null) ? $source['identifier_field'] : '';
@@ -169,7 +172,7 @@ class PreviewBuilder
                 $value = $result['base']['values'][$target] ?? null;
                 $error = $result['base']['errors'][$target] ?? null;
                 $note = null;
-                if ($error === null && $value !== null) {
+                if ($error === null && ($value !== null || ($target === 'features' && self::variantFeaturesExpression($source) !== null))) {
                     $ownId = $identifier !== '' && is_scalar($item[$identifier] ?? null) ? (string) $item[$identifier] : '';
                     $ownReference = is_scalar($result['base']['values']['reference'] ?? null) ? (string) $result['base']['values']['reference'] : '';
                     [$text, $error, $note] = $this->describe((string) $target, $value, $options, $feedIds, $ownId, $ownReference, $source, $item);
@@ -185,7 +188,7 @@ class PreviewBuilder
             foreach ($result['variants']['items'] as $variant) {
                 $variantErrors += count($variant['fields']['errors']) + count($variant['attributes']['errors']);
                 $variantCells = [];
-                foreach (['reference', 'ean13', 'mpn', 'price', 'quantity', 'active', 'available_now', 'available_later', 'image'] as $field) {
+                foreach (['reference', 'ean13', 'mpn', 'price', 'quantity', 'active', 'available_now', 'available_later', 'image', 'features'] as $field) {
                     $variantCells[$field] = ['value' => self::display($variant['fields']['values'][$field] ?? null), 'error' => $variant['fields']['errors'][$field] ?? null];
                 }
                 $attributes = [];
@@ -215,12 +218,18 @@ class PreviewBuilder
     {
         switch ($target) {
             case 'features':
+                [$variantValues, $variantErrors] = $this->variantFeatureValues($source, $item);
                 try {
-                    $mapped = $this->features->resolve($value, $item, (int) $source['id_source'], (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE), (int) ($source['id_lang_default'] ?? 1), false);
+                    $mapped = $this->features->resolve($value, $item, (int) $source['id_source'], (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE), (int) ($source['id_lang_default'] ?? 1), false, $variantValues);
+                    $mapped['warnings'] = array_merge($variantErrors, $mapped['warnings']);
                 } catch (\InvalidArgumentException $error) {
                     return [self::display($value), $error->getMessage(), null];
                 }
-                $text = mb_substr(implode('; ', array_map(static fn (array $pair): string => $pair[0] . ': ' . $pair[1], $mapped['pairs'])), 0, self::DISPLAY_LIMIT);
+                $grouped = [];
+                foreach ($mapped['pairs'] as [$label, $one]) {
+                    $grouped[$label][] = $one;
+                }
+                $text = mb_substr(implode('; ', array_map(static fn (string $label): string => $label . ': ' . implode(', ', $grouped[$label]), array_keys($grouped))), 0, self::DISPLAY_LIMIT);
                 $notes = [];
                 foreach (['ignored' => 'ignored', 'unmapped' => 'not mapped (source setting: ignore)'] as $key => $label) {
                     if ($mapped[$key] !== []) {
@@ -271,6 +280,40 @@ class PreviewBuilder
         }
 
         return [self::display($value), null, null];
+    }
+
+    /** The variant `features` formula of the source, or null. */
+    private static function variantFeaturesExpression(array $source): ?string
+    {
+        $configuration = $source['variant_mapping'] ?? null;
+        $expression = is_array($configuration) ? trim((string) ($configuration['fields']['features'] ?? '')) : '';
+
+        return $expression === '' || trim((string) ($configuration['variants_expression'] ?? '')) === '' ? null : $expression;
+    }
+
+    /** @return array{0: array<int, mixed>, 1: list<string>} each variant's raw `features` value by index, and the formula errors */
+    private function variantFeatureValues(array $source, array $item): array
+    {
+        $expression = self::variantFeaturesExpression($source);
+        if ($expression === null) {
+            return [[], []];
+        }
+        $values = [];
+        $errors = [];
+        try {
+            foreach ($this->variants->variants($item, $source['variant_mapping']['variants_expression']) as $index => $variant) {
+                $mapped = $this->variants->mapFields($item, $variant, ['features' => $expression]);
+                if (isset($mapped['errors']['features'])) {
+                    $errors[] = 'variant ' . $index . ': ' . $mapped['errors']['features'];
+                } elseif ($mapped['values']['features'] !== null) {
+                    $values[$index] = $mapped['values']['features'];
+                }
+            }
+        } catch (\Throwable $error) {
+            $errors[] = $error->getMessage();
+        }
+
+        return [$values, $errors];
     }
 
     /** Non-empty entries of a list value (or a single scalar) as strings. */

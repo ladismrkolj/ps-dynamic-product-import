@@ -7,6 +7,7 @@
 /* Every editor tab uses the full width of the card: PrestaShop's horizontal form reserves a label column and indents the wrapper. */
 .pi-wide-wrapper { margin-left: 0 !important; margin-right: 0 !important; max-width: none !important; width: 100% !important; padding-left: 0 !important; padding-right: 0 !important; }
 #pi-source-tabs > .nav-tabs { padding-left: 0; }
+.pi-wide-group { margin-left: 0 !important; margin-right: 0 !important; }
 .pi-wide-tabs { width: 100% !important; margin-left: 0 !important; float: none !important; padding: 0 !important; }
 #pi-source-tabs .pi-changed { border-color: #f0ad4e !important; background-color: #fff8e1 !important; }
 #pi-category-root .form-group { margin-left: 0; margin-right: 0; }
@@ -84,6 +85,7 @@
     if (tree) categoryRoot.appendChild(Array.from(wrapper.children).find(function (element) { return selected.has(element); }));
     // Every tab uses the full width of the card.
     tabs.parentElement.classList.add('pi-wide-tabs');
+    group.classList.add('pi-wide-group');
     var formWrapper = tabs.closest('.form-wrapper');
     if (formWrapper) formWrapper.classList.add('pi-wide-wrapper');
     var links = Array.from(tabs.querySelectorAll('.nav-tabs a'));

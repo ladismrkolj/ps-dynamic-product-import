@@ -21,12 +21,12 @@ final class FeatureMapping
     public const UNMAPPED = [self::UNMAPPED_IGNORE, self::UNMAPPED_CREATE];
 
     /**
-     * @param array<string,string> $pairs feed name => value, as normalised by NativeFields::features()
+     * @param array<string,string|list<string>> $pairs feed name => value (or the distinct values of a product with variants)
      * @param array<string,array{action?:string,id_feature?:int|string|null,create_name?:?string,value_expression?:?string}> $rules mapping rows by feed name
      * @param callable(string,string,string):mixed $transform fn(feed name, value expression, value) evaluates a value formula
      *
      * @return array{
-     *     entries: list<array{name:string,value:string,id_feature:?int,create:?string,connect:bool}>,
+     *     entries: list<array{name:string,values:list<string>,id_feature:?int,create:?string,connect:bool}>,
      *     ignored: list<string>, unmapped: list<string>, skipped: list<string>, errors: list<string>, conflicts: list<string>
      * } ignored: names with the action ignore; unmapped: names left out by the source setting;
      *   skipped: names whose value formula gave no value; errors: "name: message"; conflicts: one message per lost duplicate
@@ -46,18 +46,29 @@ final class FeatureMapping
                 $plan['unmapped'][] = $name;
                 continue;
             }
-            $value = (string) $value;
+            $values = is_array($value) ? array_map('strval', array_values($value)) : [(string) $value];
             if ($rule['value_expression'] !== null) {
-                try {
-                    $value = NativeFields::featureValue($transform($name, $rule['value_expression'], $value));
-                } catch (\Throwable $error) {
-                    $plan['errors'][] = $name . ': ' . $error->getMessage();
+                $kept = [];
+                $failed = false;
+                foreach ($values as $one) {
+                    try {
+                        $result = NativeFields::featureValue($transform($name, $rule['value_expression'], $one));
+                    } catch (\Throwable $error) {
+                        $plan['errors'][] = $name . ': ' . $error->getMessage();
+                        $failed = true;
+                        continue;
+                    }
+                    if ($result !== null) {
+                        $kept[FeatureValueMatcher::normalize($result)] ??= $result;
+                    }
+                }
+                if ($kept === []) {
+                    if (!$failed) {
+                        $plan['skipped'][] = $name;
+                    }
                     continue;
                 }
-                if ($value === null) {
-                    $plan['skipped'][] = $name;
-                    continue;
-                }
+                $values = array_values($kept);
             }
             $idFeature = $rule['action'] === self::MAP ? $rule['id_feature'] : null;
             $create = $rule['action'] === self::MAP ? null : ($rule['action'] === self::CREATE ? $rule['create_name'] : $name);
@@ -68,7 +79,7 @@ final class FeatureMapping
                 continue;
             }
             $winners[$key] = $name;
-            $plan['entries'][] = ['name' => $name, 'value' => $value, 'id_feature' => $idFeature, 'create' => $create, 'connect' => $rule['action'] === self::CREATE];
+            $plan['entries'][] = ['name' => $name, 'values' => $values, 'id_feature' => $idFeature, 'create' => $create, 'connect' => $rule['action'] === self::CREATE];
         }
 
         return $plan;

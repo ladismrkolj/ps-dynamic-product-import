@@ -4,6 +4,8 @@ namespace ProductImport\Tests;
 
 use PHPUnit\Framework\TestCase;
 use ProductImport\Service\FeatureMapping;
+use ProductImport\Service\FeatureValues;
+use ProductImport\Service\NativeFields;
 use ProductImport\Service\FeatureValueMatcher;
 
 class FeatureMappingTest extends TestCase
@@ -40,7 +42,7 @@ class FeatureMappingTest extends TestCase
         self::assertSame([], $ignored['ignored']);
 
         $created = self::plan(['Colour' => 'Red'], [], 'create');
-        self::assertSame([['name' => 'Colour', 'value' => 'Red', 'id_feature' => null, 'create' => 'Colour', 'connect' => false]], $created['entries']);
+        self::assertSame([['name' => 'Colour', 'values' => ['Red'], 'id_feature' => null, 'create' => 'Colour', 'connect' => false]], $created['entries']);
         self::assertSame([], $created['unmapped']);
 
         $explicitNone = self::plan(['Colour' => 'Red'], ['Colour' => self::row('none')], 'create');
@@ -59,8 +61,8 @@ class FeatureMappingTest extends TestCase
     {
         $plan = self::plan(['Finbox' => 'US-BOX', 'Weight' => '12'], ['Finbox' => self::row('create', null, 'Fin box'), 'Weight' => self::row('map', 6)]);
         self::assertSame([
-            ['name' => 'Finbox', 'value' => 'US-BOX', 'id_feature' => null, 'create' => 'Fin box', 'connect' => true],
-            ['name' => 'Weight', 'value' => '12', 'id_feature' => 6, 'create' => null, 'connect' => false],
+            ['name' => 'Finbox', 'values' => ['US-BOX'], 'id_feature' => null, 'create' => 'Fin box', 'connect' => true],
+            ['name' => 'Weight', 'values' => ['12'], 'id_feature' => 6, 'create' => null, 'connect' => false],
         ], $plan['entries']);
     }
 
@@ -71,7 +73,7 @@ class FeatureMappingTest extends TestCase
             ['A' => self::row('create', null, 'A', 'upper'), 'B' => self::row('create', null, 'B', 'null'), 'C' => self::row('create', null, 'C', 'empty'),
                 'D' => self::row('create', null, 'D', 'bad'), 'E' => self::row('create', null, 'E', 'list')]
         );
-        self::assertSame('X', $plan['entries'][0]['value']);
+        self::assertSame(['X'], $plan['entries'][0]['values']);
         self::assertCount(1, $plan['entries']);
         self::assertSame(['B', 'C'], $plan['skipped']);
         self::assertSame(['D: boom', 'E: value must be text or a number'], $plan['errors']);
@@ -80,7 +82,7 @@ class FeatureMappingTest extends TestCase
     public function testFormulaAlsoAppliesToAnUnmappedNameThatTheSettingCreates(): void
     {
         $plan = self::plan(['A' => 'x'], ['A' => self::row('none', null, null, 'upper')], 'create');
-        self::assertSame('X', $plan['entries'][0]['value']);
+        self::assertSame(['X'], $plan['entries'][0]['values']);
         $ignored = self::plan(['A' => 'x'], ['A' => self::row('none', null, null, 'upper')], 'ignore');
         self::assertSame([], $ignored['entries']);
     }
@@ -128,5 +130,37 @@ class FeatureMappingTest extends TestCase
         self::assertSame(['us-box' => 4, 'slot' => 7], $index, 'the lowest id wins');
         self::assertSame(4, $index[FeatureValueMatcher::normalize('US-Box')] ?? null);
         self::assertArrayNotHasKey(FeatureValueMatcher::normalize('US BOX'), $index);
+    }
+
+    public function testMultipleValuesAreFormulaedPerValueAndDeduplicated(): void
+    {
+        $plan = self::plan(['Area' => ['7', '9', '9 ']], ['Area' => self::row('create', null, 'Area', 'upper')]);
+        self::assertSame(['7', '9'], $plan['entries'][0]['values']);
+        $none = self::plan(['Area' => ['7', '9']], ['Area' => self::row('create', null, 'Area', 'null')]);
+        self::assertSame(['Area'], $none['skipped']);
+        $plain = self::plan(['Area' => ['7', '9']], ['Area' => self::row('map', 6)]);
+        self::assertSame(['7', '9'], $plain['entries'][0]['values']);
+    }
+
+    public function testFeatureValuesAggregateProductFirstThenVariantsDistinctly(): void
+    {
+        $combined = FeatureValues::combine([
+            ['Area' => '7', 'Colour' => 'Red'],
+            ['Area' => '9', 'Fin' => 'US-Box'],
+            ['Area' => ' 9 ', 'Fin' => 'us-box', 'Colour' => 'RED'],
+            ['Area' => '7', 'Area2' => '1'],
+            [],
+        ]);
+        self::assertSame(['Area' => ['7', '9'], 'Colour' => ['Red'], 'Fin' => ['US-Box'], 'Area2' => ['1']], $combined);
+        self::assertSame(['Area', 'Colour', 'Fin', 'Area2'], array_keys($combined));
+        self::assertSame([], FeatureValues::combine([]));
+    }
+
+    public function testFingerprintCoversSeveralValuesOfOneFeatureInAnyOrder(): void
+    {
+        $a = NativeFields::featuresFingerprint([['id_feature' => 4, 'id_feature_value' => 9], ['id_feature' => 4, 'id_feature_value' => 7]]);
+        $b = NativeFields::featuresFingerprint([['id_feature' => '4', 'id_feature_value' => '7'], ['id_feature' => '4', 'id_feature_value' => '9']]);
+        self::assertSame($a, $b);
+        self::assertNotSame($a, NativeFields::featuresFingerprint([['id_feature' => 4, 'id_feature_value' => 7]]));
     }
 }

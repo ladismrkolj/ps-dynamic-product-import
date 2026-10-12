@@ -87,7 +87,8 @@
     ['active', '', 'false sets zero stock.'],
     ['available_now', '', 'Text shown when the combination is in stock.'],
     ['available_later', '', 'Text shown when the combination is out of stock.'],
-    ['image', '', 'Combination image URL.']
+    ['image', '', 'Combination image URL.'],
+    ['features', 'map or list', 'Features of this variant ({feed name: value} map or list of {name, value}), added to the product\'s features: every distinct value across the variants is kept (several values per feature). Names go through the Features tab.', {hint: "Examples: row(fields['specification_table'], ['Area (m²)'], variant['size'])  or  pairs(path(variant, 'attrs'), 'name', 'value')"}]
   ];
 
   function quote(value) {
@@ -1010,7 +1011,8 @@
       var table = document.createElement('table');
       table.className = 'table table-condensed pi-variant-table';
       var head = table.createTHead().insertRow();
-      ['Attributes', 'Reference', 'EAN-13', 'MPN', 'Price (impact)', 'Quantity', 'Active', 'Available now', 'Available later', 'Image'].forEach(function (title) {
+      var showFeatures = row.variants.items.some(function (variant) { return variant.cells.features && (variant.cells.features.value !== null || variant.cells.features.error); });
+      ['Attributes', 'Reference', 'EAN-13', 'MPN', 'Price (impact)', 'Quantity', 'Active', 'Available now', 'Available later', 'Image'].concat(showFeatures ? ['Features'] : []).forEach(function (title) {
         var th = document.createElement('th');
         th.scope = 'col';
         th.textContent = title;
@@ -1050,6 +1052,7 @@
           text.textContent = full.length > 40 ? '…' + full.slice(-39) : full;
           imageCell.replaceChildren(text);
         }
+        if (showFeatures) setCell(vr.insertCell(), variant.cells.features);
       });
       if (row.variants.truncated > 0) {
         var more = tbody.insertRow().insertCell();

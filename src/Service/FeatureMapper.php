@@ -36,8 +36,9 @@ class FeatureMapper
     }
 
     /**
-     * @param mixed $features the value of the `features` field: a {name: value} map or a list of {name, value}
+     * @param mixed $features the value of the `features` field: a {name: value} map or a list of {name, value}; null when only variants have features
      * @param array $item the feed item, the `fields` variable of the value formulas
+     * @param array<int|string, mixed> $variantFeatures the variants' `features` values by variant index (null entries are skipped); their values are added to the product's
      *
      * @return array{rows: list<array{id_feature:int,id_feature_value:int}>, pairs: list<array{0:string,1:string}>, ignored: list<string>, unmapped: list<string>, warnings: list<string>}
      *               rows: committed features; pairs: the features as [shop feature name, value] (preview); ignored: names with the action
@@ -45,11 +46,31 @@ class FeatureMapper
      *
      * @throws \InvalidArgumentException when $features is neither a map nor a list of {name, value}
      */
-    public function resolve(mixed $features, array $item, int $idSource, string $unmapped, int $idLang, bool $commit): array
+    public function resolve(mixed $features, array $item, int $idSource, string $unmapped, int $idLang, bool $commit, array $variantFeatures = []): array
     {
-        $normalized = NativeFields::features($features);
-        $warnings = $normalized['warnings'];
-        $pairs = $normalized['pairs'];
+        $warnings = [];
+        $sources = [];
+        if ($features !== null) {
+            $normalized = NativeFields::features($features);
+            $warnings = $normalized['warnings'];
+            $sources[] = $normalized['pairs'];
+        }
+        foreach ($variantFeatures as $index => $raw) {
+            if ($raw === null) {
+                continue;
+            }
+            try {
+                $normalized = NativeFields::features($raw);
+            } catch (\InvalidArgumentException $error) {
+                $warnings[] = 'variant ' . $index . ': ' . $error->getMessage();
+                continue;
+            }
+            foreach ($normalized['warnings'] as $warning) {
+                $warnings[] = 'variant ' . $index . ' ' . $warning;
+            }
+            $sources[] = $normalized['pairs'];
+        }
+        $pairs = FeatureValues::combine($sources);
         $rules = $this->rules($idSource);
         foreach (array_keys($pairs) as $name) {
             $name = (string) $name;
@@ -94,27 +115,35 @@ class FeatureMapper
                     continue;
                 }
                 $taken[$key] = $entry['name'];
-                $result['pairs'][] = [$target !== null ? $this->featureName($target, $idLang) : (string) $entry['create'], $entry['value']];
+                foreach ($entry['values'] as $value) {
+                    $result['pairs'][] = [$target !== null ? $this->featureName($target, $idLang) : (string) $entry['create'], $value];
+                }
                 continue;
             }
-            try {
-                $row = $entry['id_feature'] !== null
-                    ? $this->resolver->resolveById($entry['id_feature'], $entry['value'], $idLang)
-                    : $this->resolver->resolve((string) $entry['create'], $entry['value'], $idLang);
-            } catch (\InvalidArgumentException $error) {
-                $warnings[] = '"' . $entry['name'] . '": ' . $error->getMessage() . ', skipped';
-                continue;
+            $first = true;
+            foreach ($entry['values'] as $value) {
+                try {
+                    $row = $entry['id_feature'] !== null
+                        ? $this->resolver->resolveById($entry['id_feature'], $value, $idLang)
+                        : $this->resolver->resolve((string) $entry['create'], $value, $idLang);
+                } catch (\InvalidArgumentException $error) {
+                    $warnings[] = '"' . $entry['name'] . '": ' . $error->getMessage() . ', skipped';
+                    continue;
+                }
+                if ($first) {
+                    $first = false;
+                    if ($entry['connect']) {
+                        $this->mappings->connect($idSource, $entry['name'], $row['id_feature']);
+                        $this->rules[$idSource][$entry['name']] = ['action' => FeatureMapping::MAP, 'id_feature' => $row['id_feature'], 'value_expression' => $rules[$entry['name']]['value_expression'] ?? null];
+                    }
+                    if (isset($taken[$row['id_feature']])) {
+                        $conflicts[] = 'feed names "' . $taken[$row['id_feature']] . '" and "' . $entry['name'] . '" both map to the feature #' . $row['id_feature'] . '; "' . $taken[$row['id_feature']] . '" is used';
+                        break;
+                    }
+                    $taken[$row['id_feature']] = $entry['name'];
+                }
+                $result['rows'][] = $row;
             }
-            if ($entry['connect']) {
-                $this->mappings->connect($idSource, $entry['name'], $row['id_feature']);
-                $this->rules[$idSource][$entry['name']] = ['action' => FeatureMapping::MAP, 'id_feature' => $row['id_feature'], 'value_expression' => $rules[$entry['name']]['value_expression'] ?? null];
-            }
-            if (isset($taken[$row['id_feature']])) {
-                $conflicts[] = 'feed names "' . $taken[$row['id_feature']] . '" and "' . $entry['name'] . '" both map to the feature #' . $row['id_feature'] . '; "' . $taken[$row['id_feature']] . '" is used';
-                continue;
-            }
-            $taken[$row['id_feature']] = $entry['name'];
-            $result['rows'][] = $row;
         }
         if ($conflicts !== []) {
             $warnings[] = 'several feed names map to one feature: ' . implode('; ', $conflicts);
@@ -129,7 +158,7 @@ class FeatureMapper
      *
      * @return array{unique_features:int,items_scanned:int,failed_items:int,errors:list<string>,errors_omitted:int}
      */
-    public function discover(array $items, int $idSource, string $expression): array
+    public function discover(array $items, int $idSource, ?string $expression, ?string $variantsExpression = null, ?string $variantFeaturesExpression = null): array
     {
         $found = [];
         $failed = 0;
@@ -139,16 +168,27 @@ class FeatureMapper
                 if (!is_array($item)) {
                     throw new \InvalidArgumentException('Item is not an object.');
                 }
-                $value = $this->evaluator->evaluate($expression, ['fields' => $item]);
-                if ($value === null) {
-                    continue;
+                $sources = [];
+                $value = $expression === null ? null : $this->evaluator->evaluate($expression, ['fields' => $item]);
+                if ($value !== null) {
+                    $sources[] = NativeFields::features($value)['pairs'];
                 }
-                foreach (NativeFields::features($value)['pairs'] as $name => $text) {
-                    $name = (string) $name;
+                if ($variantsExpression !== null && $variantFeaturesExpression !== null) {
+                    $variants = $this->evaluator->evaluate($variantsExpression, ['fields' => $item]);
+                    foreach (is_array($variants) ? $variants : [] as $variant) {
+                        $raw = is_array($variant) ? $this->evaluator->evaluate($variantFeaturesExpression, ['fields' => $item, 'variant' => $variant]) : null;
+                        if ($raw !== null) {
+                            $sources[] = NativeFields::features($raw)['pairs'];
+                        }
+                    }
+                }
+                foreach (FeatureValues::combine($sources) as $name => $texts) {
                     $found[$name] ??= ['count' => 0, 'samples' => []];
                     ++$found[$name]['count'];
-                    if (count($found[$name]['samples']) < self::SAMPLE_LIMIT && !in_array($text, $found[$name]['samples'], true)) {
-                        $found[$name]['samples'][] = $text;
+                    foreach ($texts as $text) {
+                        if (count($found[$name]['samples']) < self::SAMPLE_LIMIT && !in_array($text, $found[$name]['samples'], true)) {
+                            $found[$name]['samples'][] = $text;
+                        }
                     }
                 }
             } catch (\Throwable $error) {

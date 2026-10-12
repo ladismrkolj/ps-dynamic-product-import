@@ -284,4 +284,16 @@ class PreviewBuilderTest extends TestCase
         self::assertSame('features must be a map of name to value, or a list of {name, value}.', $rows[2]['cells']['features']['error']);
         self::assertSame([], $mappings->writes, 'the preview never writes');
     }
+
+    public function testVariantFeaturesAreCombinedInTheFeaturesColumnAndShownPerVariant(): void
+    {
+        $source = $this->withDefaults(['identifier_field' => 'id', 'unmapped_features' => 'create',
+            'field_mapping' => ['name' => 'fields["name"]'],
+            'variant_mapping' => ['variants_expression' => 'fields["variants"]', 'attributes' => [['name' => 'Size', 'expression' => 'variant["size"]']],
+                'fields' => ['reference' => 'variant["sku"]', 'features' => "{'Area': variant['size']}"]]]);
+        $items = [['id' => 'A', 'name' => 'Kite', 'variants' => [['sku' => 'a', 'size' => '7'], ['sku' => 'b', 'size' => '9'], ['sku' => 'c', 'size' => '7']]]];
+        $row = $this->builder()->table($source, $items)['rows'][0];
+        self::assertSame('Area: 7, 9', $row['cells']['features']['value']);
+        self::assertSame('{"Area":"7"}', $row['variants']['items'][0]['cells']['features']['value']);
+    }
 }

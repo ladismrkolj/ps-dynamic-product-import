@@ -76,4 +76,44 @@ class FeatureMapperTest extends TestCase
         self::assertArrayNotHasKey('Weight', $mappings->discovered);
         self::assertSame(NativeFields::FEATURE_NAME_LIMIT, 128);
     }
+
+    public function testVariantFeaturesAreCombinedAndMappedThroughTheSameRules(): void
+    {
+        $mappings = new FakeFeatureMappings();
+        $mappings->rows['Area'] = FakeFeatureMappings::row('Area', 'create', null, 'Area (m2)');
+        $mappings->rows['Size'] = FakeFeatureMappings::row('Size', 'ignore');
+        $resolver = new FakeFeatureResolver();
+        $mapper = $this->mapper($mappings, $resolver);
+        $result = $mapper->resolve(['Area' => '7', 'Colour' => 'Red'], [], 1, 'ignore', 1, true, [0 => ['Area' => '9', 'Size' => '9'], 1 => null, 2 => ['Area' => ' 7', 'Size' => '12'], 3 => 'junk']);
+        self::assertSame([['Area (m2)', '7', 1], ['Area (m2)', '9', 1]], array_map(static fn (array $call): array => [$call[0], $call[1], $call[2]], $resolver->calls));
+        self::assertCount(2, $result['rows']);
+        self::assertSame(['Size'], $result['ignored']);
+        self::assertSame(['Colour'], $result['unmapped']);
+        self::assertStringContainsString('variant 3:', implode(' ', $result['warnings']));
+    }
+
+    public function testOnlyVariantFeaturesNeedNoProductLevelValueAndPreviewJoinsValues(): void
+    {
+        $mappings = new FakeFeatureMappings();
+        $mappings->rows['Area'] = FakeFeatureMappings::row('Area', 'map', 6);
+        $result = $this->mapper($mappings)->resolve(null, [], 1, 'ignore', 1, false, [0 => ['Area' => '7'], 1 => ['Area' => '9']]);
+        self::assertSame([['Weight', '7'], ['Weight', '9']], $result['pairs']);
+        self::assertSame([], $mappings->writes);
+    }
+
+    public function testDiscoveryScansVariantFeaturesWithTheVariantBound(): void
+    {
+        $mappings = new FakeFeatureMappings();
+        $items = [
+            ['specs' => ['Colour' => 'Red'], 'variants' => [['size' => '7'], ['size' => '9'], ['size' => '7']]],
+            ['variants' => [['size' => '12']]],
+            ['variants' => []],
+        ];
+        $result = $this->mapper($mappings)->discover($items, 1, "fields['specs']", "fields['variants']", "{'Area': variant['size']}");
+        self::assertSame(0, $result['failed_items']);
+        self::assertSame(['count' => 2, 'samples' => ['7', '9', '12']], $mappings->discovered['Area']);
+        self::assertSame(1, $mappings->discovered['Colour']['count']);
+        $variantsOnly = $this->mapper(new FakeFeatureMappings())->discover($items, 1, null, "fields['variants']", "{'Area': variant['size']}");
+        self::assertSame(2, $variantsOnly['unique_features'] + 1);
+    }
 }

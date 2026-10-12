@@ -124,10 +124,26 @@ class ImportRunner
                 unset($values['features']);
                 // Logged only when the item is imported: an unchanged item would repeat them every run.
                 $featureLog = [];
-                if ($rawFeatures !== null) {
+                // A variant `features` field adds each variant's values to the product's features.
+                $configuration = $source['variant_mapping'] ?? null;
+                $variantFeatures = is_array($configuration) ? trim((string) ($configuration['fields']['features'] ?? '')) : '';
+                $variants = null;
+                $variantFeatureValues = [];
+                if ($variantFeatures !== '' && trim($configuration['variants_expression'] ?? '') !== '') {
+                    $variants = $this->variants->variants($item, $configuration['variants_expression']);
+                    foreach ($variants as $variantIndex => $variant) {
+                        $mapped = $this->variants->mapFields($item, $variant, ['features' => $variantFeatures]);
+                        if (isset($mapped['errors']['features'])) {
+                            $featureLog[] = "variant $variantIndex: " . $mapped['errors']['features'];
+                        } elseif ($mapped['values']['features'] !== null) {
+                            $variantFeatureValues[$variantIndex] = $mapped['values']['features'];
+                        }
+                    }
+                }
+                if ($rawFeatures !== null || $variantFeatureValues !== []) {
                     try {
-                        $resolved = $this->features->resolve($rawFeatures, $item, $idSource, (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE), $idLang, true);
-                        $featureLog = $resolved['warnings'];
+                        $resolved = $this->features->resolve($rawFeatures, $item, $idSource, (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE), $idLang, true, $variantFeatureValues);
+                        $featureLog = array_merge($featureLog, $resolved['warnings']);
                         $values['features'] = $resolved['rows'];
                     } catch (\InvalidArgumentException $error) {
                         $featureLog[] = $error->getMessage();
@@ -156,14 +172,14 @@ class ImportRunner
                     $pendingRelated[$idProduct] = ['external_id' => $externalId, 'index' => $index, 'entries' => $related];
                 }
                 ++$counts[$existing === null ? 'created' : 'updated'];
-                $configuration = $source['variant_mapping'] ?? null;
                 $hasVariants = $configuration && trim($configuration['variants_expression'] ?? '') !== '';
-                $variants = $hasVariants ? $this->variants->variants($item, $configuration['variants_expression']) : [];
+                $variants ??= $hasVariants ? $this->variants->variants($item, $configuration['variants_expression']) : [];
+                $variantFieldMapping = array_diff_key($hasVariants ? $configuration['fields'] : [], ['features' => 1]);
                 $basePrice = $hasVariants ? $this->catalog->variantBasePrice($idProduct) : 0.0;
                 $variantFailed = false;
                 foreach ($variants as $variantIndex => $variant) {
                     try {
-                        $fields = $this->variants->mapFields($item, $variant, $configuration['fields']);
+                        $fields = $this->variants->mapFields($item, $variant, $variantFieldMapping);
                         $attributes = $this->variants->mapAttributes($item, $variant, $configuration['attributes']);
                         $limited = NativeFields::limitTexts($fields['values'], NativeFields::COMBINATION_TEXT_LIMITS);
                         $fields['values'] = $limited['values'];

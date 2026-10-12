@@ -603,11 +603,15 @@ class AdminPiSourceController extends ModuleAdminController
             $source = $this->featureSource('edit');
             $mapping = json_decode($source['field_mapping'], true, 512, JSON_THROW_ON_ERROR);
             $expression = $mapping['features'] ?? null;
-            if (!is_string($expression) || trim($expression) === '') {
-                throw new InvalidArgumentException('Save a features expression before discovery.');
+            $expression = is_string($expression) && trim($expression) !== '' ? $expression : null;
+            $variant = json_decode((string) ($source['variant_mapping'] ?? ''), true);
+            $variantsExpression = is_array($variant) && is_string($variant['variants_expression'] ?? null) && trim($variant['variants_expression']) !== '' ? $variant['variants_expression'] : null;
+            $variantFeatures = is_array($variant) && is_string($variant['fields']['features'] ?? null) && trim($variant['fields']['features']) !== '' ? $variant['fields']['features'] : null;
+            if ($expression === null && ($variantsExpression === null || $variantFeatures === null)) {
+                throw new InvalidArgumentException('Save a features expression (product or variant) before discovery.');
             }
             $mapper = new \ProductImport\Service\FeatureMapper(new \ProductImport\Repository\FeatureMappingRepository(), new \ProductImport\Service\FeatureResolver(), new \ProductImport\Service\ExpressionEvaluator());
-            $result = $mapper->discover($this->cachedFeed($source)['items'], (int) $source['id_source'], $expression);
+            $result = $mapper->discover($this->cachedFeed($source)['items'], (int) $source['id_source'], $expression, $variantsExpression, $variantFeatures);
         } catch (Throwable $error) {
             $result = ['error' => $error->getMessage()];
         }

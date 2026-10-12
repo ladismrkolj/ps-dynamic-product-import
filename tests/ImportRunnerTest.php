@@ -908,4 +908,19 @@ class ImportRunnerTest extends TestCase
         $second = $runner->runOne($this->source(), 'admin-manual');
         self::assertSame(['created' => 0, 'updated' => 1, 'unchanged' => 0, 'skipped' => 0, 'failed' => 0, 'deleted' => 0], $second['counts']);
     }
+
+    public function testVariantFeaturesAddDistinctValuesToTheProductAndStayOutOfTheCombination(): void
+    {
+        [$runner, $state] = $this->fixture([['id' => 'new', 'props' => [['n' => 'Colour', 'v' => 'Red']], 'variants' => [['sku' => 'a', 'size' => '7'], ['sku' => 'b', 'size' => '9'], ['sku' => 'c', 'size' => '7 ']]]]);
+        $source = $this->featureSource(['variant_mapping' => ['variants_expression' => 'fields["variants"]', 'attributes' => [['name' => 'Size', 'expression' => '"M"']],
+            'fields' => ['reference' => 'variant["sku"]', 'features' => "{'Area': variant['size']}"]]]);
+        $result = $runner->runOne($source, 'admin-manual');
+        self::assertSame('completed', $result['status'], $result['error_log']);
+        self::assertSame([['Colour', 'Red', 1], ['Area', '7', 1], ['Area', '9', 1]], $state->featureResolver->calls);
+        self::assertCount(3, $state->importValues['new']['features']);
+        foreach ($state->variantFields as $fields) {
+            self::assertArrayNotHasKey('features', $fields);
+        }
+        self::assertCount(3, $state->variantFields);
+    }
 }
