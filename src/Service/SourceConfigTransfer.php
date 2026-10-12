@@ -23,9 +23,9 @@ class SourceConfigTransfer
 
     /**
      * @param array $lookups language_iso(int):?string, category_path(int):?list<string>,
-     *                       manufacturer_name(int):?string, supplier_name(int):?string
+     *                       manufacturer_name(int):?string, feature_name(int):?string, supplier_name(int):?string
      */
-    public function build(array $source, array $categoryMappings, array $brandMappings, array $lookups, string $moduleVersion, string $exportedAt): array
+    public function build(array $source, array $categoryMappings, array $brandMappings, array $featureMappings, array $lookups, string $moduleVersion, string $exportedAt): array
     {
         $fieldMapping = self::decodeObject((string) ($source['field_mapping'] ?? ''), 'field_mapping');
         $variant = trim((string) ($source['variant_mapping'] ?? '')) === '' ? null : self::decodeObject((string) $source['variant_mapping'], 'variant_mapping');
@@ -48,6 +48,23 @@ class SourceConfigTransfer
         foreach ($brandMappings as $row) {
             $brands[(string) $row['source_name']] = $id($row['id_manufacturer'], $lookups['manufacturer_name']);
         }
+        // Feed feature name => {ignore: true} | {feature: shop feature name} | {create: name}, plus an optional value formula; {} = not mapped (the source setting decides).
+        $features = [];
+        foreach ($featureMappings as $row) {
+            $rule = FeatureMapping::effective($row);
+            $entry = [];
+            if ($rule['action'] === FeatureMapping::IGNORE) {
+                $entry['ignore'] = true;
+            } elseif ($rule['action'] === FeatureMapping::MAP && ($name = $lookups['feature_name']($rule['id_feature'])) !== null) {
+                $entry['feature'] = $name;
+            } elseif ($rule['action'] === FeatureMapping::CREATE) {
+                $entry['create'] = $rule['create_name'];
+            }
+            if ($rule['value_expression'] !== null) {
+                $entry['value'] = $rule['value_expression'];
+            }
+            $features[(string) $row['source_name']] = $entry;
+        }
 
         return [
             'format' => self::FORMAT,
@@ -61,6 +78,7 @@ class SourceConfigTransfer
                 'active' => (bool) $source['active'],
                 'deactivate_missing' => (bool) $source['deactivate_missing'],
                 'delete_missing_days' => MissingLifecycle::normalizeDays($source['delete_missing_days'] ?? null),
+                'unmapped_features' => (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE),
                 'source_format' => (string) $source['source_format'],
                 'location' => $source['location'] ?? null,
                 'xml_item_path' => $source['xml_item_path'] ?? null,
@@ -75,6 +93,7 @@ class SourceConfigTransfer
             ],
             'category_mappings' => $categories,
             'brand_mappings' => $brands,
+            'feature_mappings' => $features,
         ];
     }
 
@@ -95,6 +114,12 @@ class SourceConfigTransfer
             . "#                     matched exactly). ~ or null = resolve and connect it again on the next run. A name that itself\n"
             . "#                     contains ' > ' cannot be written here.\n"
             . "# brand_mappings:     feed brand name: PrestaShop brand name. ~ or null = resolve and connect it again on the next run.\n"
+            . "# unmapped_features:  what happens to a feed feature name without a feature_mappings entry: ignore (not imported) or create\n"
+            . "#                     (a feature with the feed name).\n"
+            . "# feature_mappings:   feed feature name: {ignore: true} (not imported), {feature: 'Shop feature name'} (an existing feature,\n"
+            . "#                     matched exactly in the source language) or {create: 'Name'} (a feature of that name, created if missing),\n"
+            . "#                     plus an optional value: a formula of value and fields whose null or empty result skips the feature for\n"
+            . "#                     the product. {} = not mapped (unmapped_features decides). An entry replaces the row's action and formula.\n"
             . "# Mapping entries are matched by their feed value and each feed value may appear once. Listed entries are\n"
             . "# added or updated, others are kept. An entry for a feed value not seen yet is stored and used once the feed\n"
             . "# contains it. If the PrestaShop destination does not exist, the entry is skipped with a warning.\n\n";
@@ -104,6 +129,8 @@ class SourceConfigTransfer
                 $maps[$key] = $document[$key] ?? [];
                 unset($document[$key]);
             }
+            $features = $document['feature_mappings'] ?? [];
+            unset($document['feature_mappings']);
             $yaml = Yaml::dump($document, 8, 2, Yaml::DUMP_MULTI_LINE_LITERAL_BLOCK);
             // Put the first key of a list item on the dash line ("- name: x"); keep the original if that would change the data.
             $compact = preg_replace('/^( *)-\n\1  (?=\S)/m', '$1- ', $yaml);
@@ -117,11 +144,22 @@ class SourceConfigTransfer
                     $yaml .= '  ' . self::quote((string) $feed) . ': ' . ($destination === null ? '~' : self::quote((string) $destination)) . "\n";
                 }
             }
+            $yaml .= 'feature_mappings:' . ($features === [] ? " {}\n" : "\n");
+            foreach ($features as $feed => $entry) {
+                $parts = [];
+                foreach ($entry as $key => $value) {
+                    $parts[] = $key . ': ' . ($value === true ? 'true' : self::quote((string) $value));
+                }
+                $yaml .= '  ' . self::quote((string) $feed) . ': {' . implode(', ', $parts) . "}\n";
+            }
             $parsed = Yaml::parse($yaml);
             foreach ($maps as $key => $entries) {
                 if (($parsed[$key] ?? null) !== array_combine(array_map('strval', array_keys($entries)), array_values($entries)) && $entries !== []) {
                     throw new \RuntimeException('the ' . $key . ' block does not round-trip');
                 }
+            }
+            if ($features !== [] && ($parsed['feature_mappings'] ?? null) !== array_combine(array_map('strval', array_keys($features)), array_values($features))) {
+                throw new \RuntimeException('the feature_mappings block does not round-trip');
             }
 
             return $header . $yaml;
@@ -196,8 +234,73 @@ class SourceConfigTransfer
             }
             $brands[] = ['source_name' => $name, 'manufacturer' => $destination];
         }
+        $features = [];
+        foreach (self::mappingEntries($document['feature_mappings'] ?? null, 'feature_mappings') as $name => $entry) {
+            $name = NativeFields::trimText((string) $name);
+            if ($name === '' || mb_strlen($name) > NativeFields::FEATURE_NAME_LIMIT) {
+                throw new \InvalidArgumentException('Every feed feature name in "feature_mappings" must have 1 to ' . NativeFields::FEATURE_NAME_LIMIT . ' characters.');
+            }
+            if (isset($features[$name])) {
+                throw new \InvalidArgumentException('feature_mappings: "' . $name . '" appears twice (names are compared without edge spaces).');
+            }
+            $features[$name] = self::parseFeatureEntry($name, $entry);
+        }
 
-        return ['source' => $source, 'category_mappings' => $categories, 'brand_mappings' => $brands];
+        return ['source' => $source, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'feature_mappings' => array_values($features)];
+    }
+
+    /** @return array{source_name:string,action:string,feature:?string,create:?string,value:?string,invalid:?string} invalid: why the entry is skipped with a warning on import */
+    private static function parseFeatureEntry(string $name, $entry): array
+    {
+        $label = 'feature_mappings: the entry of "' . $name . '"';
+        if ($entry === null) {
+            $entry = [];
+        }
+        if (!is_array($entry) || ($entry !== [] && array_is_list($entry))) {
+            throw new \InvalidArgumentException($label . " must be a mapping like {ignore: true}, {feature: 'Name'}, {create: 'Name'} or {}.");
+        }
+        if ($unknown = array_diff(array_keys($entry), ['ignore', 'feature', 'create', 'value'])) {
+            throw new \InvalidArgumentException($label . ' has an unknown key "' . reset($unknown) . '"; use ignore, feature, create or value.');
+        }
+        if (count(array_intersect(['ignore', 'feature', 'create'], array_keys($entry))) > 1) {
+            throw new \InvalidArgumentException($label . ' may use only one of ignore, feature and create.');
+        }
+        $action = FeatureMapping::NONE;
+        $feature = $create = null;
+        if (array_key_exists('ignore', $entry)) {
+            if ($entry['ignore'] !== true) {
+                throw new \InvalidArgumentException($label . ': ignore must be true (leave the key out to not ignore).');
+            }
+            $action = FeatureMapping::IGNORE;
+        }
+        foreach (['feature' => FeatureMapping::MAP, 'create' => FeatureMapping::CREATE] as $key => $kind) {
+            if (!array_key_exists($key, $entry)) {
+                continue;
+            }
+            $value = $entry[$key];
+            if (!is_string($value) || trim($value) === '' || mb_strlen(trim($value)) > NativeFields::FEATURE_NAME_LIMIT) {
+                throw new \InvalidArgumentException($label . ': ' . $key . ' must be a feature name of 1 to ' . NativeFields::FEATURE_NAME_LIMIT . ' characters (put names that look like numbers in quotes).');
+            }
+            $action = $kind;
+            if ($key === 'feature') {
+                $feature = trim($value);
+            } else {
+                $create = trim($value);
+            }
+        }
+        $expression = $entry['value'] ?? null;
+        if ($expression !== null && (!is_string($expression) || mb_strlen($expression) > 5000)) {
+            throw new \InvalidArgumentException($label . ': value must be a formula (text of at most 5000 characters).');
+        }
+        $expression = $expression === null || trim($expression) === '' ? null : trim($expression);
+        $invalid = null;
+        if ($create !== null && !NativeFields::isGenericName($create)) {
+            $invalid = 'the feature name to create contains characters PrestaShop rejects (<>={})';
+        } elseif ($expression !== null && ($problem = (new ExpressionEvaluator())->lint($expression, ['value', 'fields'])) !== null) {
+            $invalid = 'the value formula is invalid: ' . $problem;
+        }
+
+        return ['source_name' => $name, 'action' => $action, 'feature' => $feature, 'create' => $create, 'value' => $expression, 'invalid' => $invalid];
     }
 
     /** Single-quoted YAML string ('' escapes a quote); double-quoted when it holds control characters. */
@@ -240,10 +343,11 @@ class SourceConfigTransfer
      *
      * @param array $lookups language_id(string $iso):?int, default_language_id():int, root_category_id:int,
      *                       category_children(int $parent, int $idLang):array<int,string> (id => name),
-     *                       manufacturers(string $name):array<int,string>, suppliers(string $name):array<int,string>
+     *                       manufacturers(string $name):array<int,string>, suppliers(string $name):array<int,string>,
+     *                       features(string $name, int $idLang):array<int,string> (id => name)
      * @param callable $keyTaken fn(string $key):bool
      *
-     * @return array{source: array, category_mappings: list<array>, brand_mappings: list<array>, warnings: list<string>}
+     * @return array{source: array, category_mappings: list<array>, brand_mappings: list<array>, feature_mappings: list<array>, warnings: list<string>}
      */
     public function resolve(array $document, array $lookups, callable $keyTaken): array
     {
@@ -257,6 +361,8 @@ class SourceConfigTransfer
             $data[$key] = $in[$key] ? 1 : 0;
         }
         $data['delete_missing_days'] = array_key_exists('delete_missing_days', $in) ? $in['delete_missing_days'] : MissingLifecycle::DEFAULT_DELETE_DAYS;
+        // Like the upgrade: a source that maps features keeps creating them unless the file says otherwise.
+        $data['unmapped_features'] = $in['unmapped_features'] ?? Upgrade\UnmappedFeaturesStep::settingFor((string) $in['field_mapping']);
         [$data['technical_key'], $changed] = self::uniqueKey($in['technical_key'], $keyTaken);
         if ($changed) {
             $data['name'] = mb_substr($in['name'], 0, 191 - mb_strlen(self::IMPORTED_SUFFIX)) . self::IMPORTED_SUFFIX;
@@ -275,9 +381,9 @@ class SourceConfigTransfer
         $data['default_id_manufacturer'] = self::namedId($in['default_manufacturer'], $lookups['manufacturers'], 'Default brand', $warnings);
         $data['id_supplier'] = self::namedId($in['supplier'], $lookups['suppliers'], 'Supplier', $warnings);
 
-        [$categories, $brands] = self::resolveMappings($document, $lookups, $idLang, $warnings);
+        [$categories, $brands, $features] = self::resolveMappings($document, $lookups, $idLang, $warnings);
 
-        return ['source' => $data, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'warnings' => self::capWarnings($warnings)];
+        return ['source' => $data, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'feature_mappings' => $features, 'warnings' => self::capWarnings($warnings)];
     }
 
     /**
@@ -291,7 +397,7 @@ class SourceConfigTransfer
      *
      * @throws \InvalidArgumentException when the resulting source would be invalid
      *
-     * @return array{source: array, category_mappings: list<array>, brand_mappings: list<array>, warnings: list<string>}
+     * @return array{source: array, category_mappings: list<array>, brand_mappings: list<array>, feature_mappings: list<array>, warnings: list<string>}
      *               source holds only the changed pi_source columns; mapping rows are the entries to upsert (id_category / id_manufacturer null = not mapped: default, else find or create, then connect)
      */
     public function resolveOverwrite(array $document, array $existing, array $lookups): array
@@ -311,6 +417,9 @@ class SourceConfigTransfer
         }
         if (array_key_exists('delete_missing_days', $in)) {
             $changes['delete_missing_days'] = $in['delete_missing_days'];
+        }
+        if (array_key_exists('unmapped_features', $in)) {
+            $changes['unmapped_features'] = $in['unmapped_features'];
         }
         $idLang = (int) $existing['id_lang_default'];
         if (array_key_exists('language', $in)) {
@@ -346,15 +455,15 @@ class SourceConfigTransfer
             $changes['xml_item_path'] = $merged['xml_item_path'];
         }
 
-        [$categories, $brands] = self::resolveMappings($document, $lookups, $idLang, $warnings);
+        [$categories, $brands, $features] = self::resolveMappings($document, $lookups, $idLang, $warnings);
 
-        return ['source' => $changes, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'warnings' => self::capWarnings($warnings)];
+        return ['source' => $changes, 'category_mappings' => $categories, 'brand_mappings' => $brands, 'feature_mappings' => $features, 'warnings' => self::capWarnings($warnings)];
     }
     /**
      * Resolves the mapping entries to IDs. An entry whose destination does not exist in this store is skipped with a warning,
      * so an existing row stays as it is and no new row is created for it. null destination = not mapped: default, else find or create, then connect.
      *
-     * @return array{0: list<array>, 1: list<array>} categories, brands
+     * @return array{0: list<array>, 1: list<array>, 2: list<array>} categories, brands, features (a feature entry keeps its action, the target feature id for map, the name for create, and the value formula)
      */
     private static function resolveMappings(array $document, array $lookups, int $idLang, array &$warnings): array
     {
@@ -379,8 +488,22 @@ class SourceConfigTransfer
             }
             $brands[] = ['source_name' => $row['source_name'], 'id_manufacturer' => $id];
         }
+        $features = [];
+        foreach ($document['feature_mappings'] as $row) {
+            if ($row['invalid'] !== null) {
+                $warnings[] = 'Feature mapping for "' . $row['source_name'] . '": ' . $row['invalid'] . '. The entry was left unchanged.';
+                continue;
+            }
+            $before = count($warnings);
+            $id = $row['feature'] === null ? null : self::namedId($row['feature'], static fn (string $name): array => $lookups['features']($name, $idLang), 'Feature mapping for "' . $row['source_name'] . '": feature', $warnings);
+            if ($row['feature'] !== null && $id === null) {
+                $warnings[$before] .= ' The entry was left unchanged.';
+                continue;
+            }
+            $features[] = ['source_name' => $row['source_name'], 'action' => $row['action'], 'id_feature' => $id, 'create_name' => $row['create'], 'value_expression' => $row['value']];
+        }
 
-        return [$categories, $brands];
+        return [$categories, $brands, $features];
     }
 
     private static function categoryId(?array $path, string $label, array $lookups, int $idLang, array &$warnings): ?int
@@ -492,6 +615,12 @@ class SourceConfigTransfer
                 throw new \InvalidArgumentException('"source.delete_missing_days" must be a number of days from 0 to 36500, or empty (never delete).');
             }
             $source['delete_missing_days'] = MissingLifecycle::normalizeDays($days);
+        }
+        if (array_key_exists('unmapped_features', $in)) {
+            if (!is_string($in['unmapped_features']) || !in_array($in['unmapped_features'], FeatureMapping::UNMAPPED, true)) {
+                throw new \InvalidArgumentException('"source.unmapped_features" must be ' . implode(' or ', FeatureMapping::UNMAPPED) . '.');
+            }
+            $source['unmapped_features'] = $in['unmapped_features'];
         }
         foreach (['name', 'technical_key', 'identifier_field', 'location', 'xml_item_path', 'filter_expression'] as $key) {
             if (isset($source[$key])) {

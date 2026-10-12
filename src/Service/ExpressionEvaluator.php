@@ -11,7 +11,7 @@ class ExpressionEvaluator
     public function __construct()
     {
         $this->language = new ExpressionLanguage();
-        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs', 'common', 'pick'] as $name) {
+        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs', 'common', 'pick', 'row', 'merge'] as $name) {
             $this->language->register(
                 $name,
                 static function (...$arguments) use ($name) {
@@ -22,6 +22,18 @@ class ExpressionEvaluator
                 }
             );
         }
+    }
+
+    /** @return string|null the syntax problem of an expression using the named variables, null when it parses */
+    public function lint(string $expression, array $variables): ?string
+    {
+        try {
+            $this->language->parse($expression, $variables);
+        } catch (\Throwable $error) {
+            return $error->getMessage();
+        }
+
+        return null;
     }
 
     public function evaluate(string $expression, array $variables): mixed
@@ -273,6 +285,71 @@ class ExpressionEvaluator
         }
 
         return $picked;
+    }
+
+    /**
+     * The first object of a list (a single object counts as a one-entry list) in which one of the keys equals $value.
+     * Compared as numbers when both sides are numeric ('12.0' equals '12'), otherwise as trimmed, case-insensitive text.
+     * Null when nothing matches or $list or $value is null.
+     */
+    public static function row($list, $keys, $value): ?array
+    {
+        if ($list === null || $value === null) {
+            return null;
+        }
+        if (!is_array($list)) {
+            throw new \InvalidArgumentException('row() expects a list of objects.');
+        }
+        if (!is_scalar($value) || is_bool($value)) {
+            throw new \InvalidArgumentException('row() expects text or a number to look for.');
+        }
+        $keys = is_array($keys) ? $keys : [$keys];
+        foreach ($keys as $key) {
+            if (!is_scalar($key) || is_bool($key)) {
+                throw new \InvalidArgumentException('row() expects a key or a list of keys.');
+            }
+        }
+        foreach (array_is_list($list) ? $list : [$list] as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            foreach ($keys as $key) {
+                $candidate = $entry[(string) $key] ?? null;
+                if (is_scalar($candidate) && !is_bool($candidate) && self::sameValue($candidate, $value)) {
+                    return $entry;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /** Combines maps; a later map overrides the keys of an earlier one, null arguments are skipped. */
+    public static function merge(...$maps): array
+    {
+        $merged = [];
+        foreach ($maps as $map) {
+            if ($map === null) {
+                continue;
+            }
+            if (!is_array($map)) {
+                throw new \InvalidArgumentException('merge() expects maps.');
+            }
+            foreach ($map as $key => $value) {
+                $merged[$key] = $value;
+            }
+        }
+
+        return $merged;
+    }
+
+    private static function sameValue($a, $b): bool
+    {
+        if (is_numeric($a) && is_numeric($b)) {
+            return (float) $a === (float) $b;
+        }
+
+        return mb_strtolower((string) self::trim((string) $a), 'UTF-8') === mb_strtolower((string) self::trim((string) $b), 'UTF-8');
     }
 
     private static function text(string $function, $value): ?string

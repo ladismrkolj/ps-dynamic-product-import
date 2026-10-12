@@ -1,6 +1,6 @@
 <div id="pi-import-source" class="panel" data-url="{$pi_import_url|escape:'html':'UTF-8'}">
   <h3>Import source configuration</h3>
-  <p class="help-block">Upload a <code>.productimport.yaml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, suppliers and the language are matched by name; unmatched names are listed below. Mappings are written as <code>feed value: PrestaShop value</code>; you can also list feed categories or brands the feed has not shown yet, and they are mapped as soon as they appear.</p>
+  <p class="help-block">Upload a <code>.productimport.yaml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, features (in the source language), suppliers and the language are matched by name; unmatched names are listed below. Mappings are written as <code>feed value: PrestaShop value</code>; you can also list feed categories or brands the feed has not shown yet, and they are mapped as soon as they appear.</p>
   <div class="form-group">
     <label>What to do with the file</label>
     {if $pi_import_can_create}
@@ -98,7 +98,7 @@
         if (data.mode === 'overwrite' && data.counts) {
           var c = data.counts;
           var summary = document.createElement('div');
-          summary.textContent = 'Category mappings: ' + c.categories_created + ' added, ' + c.categories_updated + ' updated. Brand mappings: ' + c.brands_created + ' added, ' + c.brands_updated + ' updated.';
+          summary.textContent = 'Category mappings: ' + c.categories_created + ' added, ' + c.categories_updated + ' updated. Brand mappings: ' + c.brands_created + ' added, ' + c.brands_updated + ' updated. Feature mappings: ' + c.features_created + ' added, ' + c.features_updated + ' updated.';
           ok.appendChild(summary);
         }
         result.appendChild(ok);

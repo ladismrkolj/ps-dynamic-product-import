@@ -32,6 +32,7 @@ class SchemaCheck
                 'id_lang_default' => 'INT UNSIGNED NOT NULL DEFAULT 1',
                 'deactivate_missing' => 'TINYINT(1) NOT NULL DEFAULT 0',
                 'delete_missing_days' => 'INT UNSIGNED NULL',
+                'unmapped_features' => "VARCHAR(16) NOT NULL DEFAULT 'ignore'",
                 'consecutive_empty_count' => 'INT UNSIGNED NOT NULL DEFAULT 0',
                 'date_add' => 'DATETIME NOT NULL',
                 'date_upd' => 'DATETIME NOT NULL',
@@ -60,6 +61,24 @@ class SchemaCheck
                 'date_upd' => 'DATETIME NOT NULL',
             ],
             'keys' => ['PRIMARY KEY (`id_mapping`)', 'UNIQUE KEY `source_path` (`id_source`, `source_path_hash`)'],
+        ],
+        // One row per (source, feed feature name). action: none (the source setting unmapped_features decides), ignore,
+        // map (existing feature id_feature) or create (a feature named create_name, which becomes map once created).
+        'pi_feature_mapping' => [
+            'columns' => [
+                'id_mapping' => 'INT UNSIGNED NOT NULL AUTO_INCREMENT',
+                'id_source' => 'INT UNSIGNED NOT NULL',
+                'source_name' => 'VARCHAR(128) ' . self::UTF8_BIN . ' NOT NULL',
+                'action' => "VARCHAR(16) NOT NULL DEFAULT 'none'",
+                'id_feature' => 'INT UNSIGNED NULL',
+                'create_name' => 'VARCHAR(128) NULL',
+                'value_expression' => 'TEXT NULL',
+                'product_count' => 'INT UNSIGNED NOT NULL DEFAULT 0',
+                'sample_values' => 'TEXT NULL',
+                'date_seen' => 'DATETIME NULL',
+                'date_upd' => 'DATETIME NOT NULL',
+            ],
+            'keys' => ['PRIMARY KEY (`id_mapping`)', 'UNIQUE KEY `source_name` (`id_source`, `source_name`)'],
         ],
         'pi_external_product' => [
             'columns' => [

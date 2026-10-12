@@ -4,6 +4,18 @@
 #pi-source-tabs > .tab-content > .tab-pane { display: none; }
 #pi-source-tabs > .tab-content > .tab-pane.active { display: block; }
 #pi-source-tabs > .tab-content { padding-top: 16px; }
+/* The mapping tabs hold wide tables: let them use the full width of the form. */
+.pi-wide-tabs { width: 100% !important; margin-left: 0 !important; }
+#pi-features table { table-layout: auto; width: 100%; }
+#pi-features td, #pi-features th { vertical-align: top; }
+#pi-features { overflow-x: auto; }
+#pi-features select.pi-feature-action { min-width: 190px; }
+#pi-features input.pi-feature-formula { min-width: 170px; }
+#pi-features input.pi-feature-create { min-width: 190px; }
+#pi-features .pi-feature-samples { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#pi-features .pi-feature-status { min-width: 120px; max-width: 180px; font-size: 12px; }
+#pi-features td { padding: 6px 8px; }
+#pi-categories table select, #pi-brands table select { min-width: 220px; }
 </style>
 <script>
 (function () {
@@ -47,6 +59,7 @@
     var tree = document.getElementById('pi-root-category-tree');
     selectGroup(tree);
     if (tree) categoryRoot.appendChild(Array.from(wrapper.children).find(function (element) { return selected.has(element); }));
+    var wideColumn = tabs.parentElement;
     var links = Array.from(tabs.querySelectorAll('.nav-tabs a'));
     var panes = Array.from(tabs.querySelector('.tab-content').children);
     var storageKey = 'productimport-tab:' + location.pathname + ':' + document.getElementById('pi-preview').dataset.source;
@@ -59,6 +72,7 @@
         link.setAttribute('aria-selected', String(active));
         link.tabIndex = active ? 0 : -1;
       });
+      wideColumn.classList.toggle('pi-wide-tabs', ['pi-categories', 'pi-brands', 'pi-features'].indexOf(id) !== -1);
       document.dispatchEvent(new CustomEvent('pi-source-tab', {detail: id}));
       try { sessionStorage.setItem(storageKey, id); } catch (error) { /* Storage may be disabled. */ }
     }

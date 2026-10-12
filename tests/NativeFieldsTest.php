@@ -121,4 +121,21 @@ class NativeFieldsTest extends TestCase
         self::assertSame([1, 2], $result['ids']);
         self::assertSame(['ghost'], $result['missing']);
     }
+
+    public function testFeatureValueNormalisesOneValue(): void
+    {
+        self::assertSame('x', NativeFields::featureValue("  x\n"));
+        self::assertSame('0', NativeFields::featureValue(0));
+        self::assertSame('1', NativeFields::featureValue(true));
+        self::assertNull(NativeFields::featureValue(null));
+        self::assertNull(NativeFields::featureValue('   '));
+        foreach ([['a'], str_repeat('x', 256)] as $bad) {
+            try {
+                NativeFields::featureValue($bad);
+                self::fail('expected an exception');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
 }

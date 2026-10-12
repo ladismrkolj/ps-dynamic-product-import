@@ -25,7 +25,7 @@ class AdminPiSourceController extends ModuleAdminController
 
     public function postProcess()
     {
-        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'addMapping' => 'ajaxProcessAddMapping', 'deleteMapping' => 'ajaxProcessDeleteMapping', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
+        $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'saveMapping' => 'ajaxProcessSaveMapping', 'saveDefault' => 'ajaxProcessSaveDefault', 'addMapping' => 'ajaxProcessAddMapping', 'deleteMapping' => 'ajaxProcessDeleteMapping', 'featureMappings' => 'ajaxProcessFeatureMappings', 'discoverFeatures' => 'ajaxProcessDiscoverFeatures', 'saveFeatureRule' => 'ajaxProcessSaveFeatureRule', 'saveFeatureSetting' => 'ajaxProcessSaveFeatureSetting', 'deleteFeatureRule' => 'ajaxProcessDeleteFeatureRule', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
         $action = Tools::getValue('action');
         if ($this->ajax && is_string($action) && isset($actions[$action])) {
             $this->{$actions[$action]}();
@@ -276,7 +276,8 @@ class AdminPiSourceController extends ModuleAdminController
                 new \ProductImport\Service\CategoryResolver(new \ProductImport\Repository\CategoryMappingRepository(), $normalizer),
                 new \ProductImport\Service\ManufacturerResolver(),
                 new \ProductImport\Service\VariantFieldMapper($evaluator),
-                new \ProductImport\Service\AttributeResolver()
+                new \ProductImport\Service\AttributeResolver(),
+                new \ProductImport\Service\FeatureMapper(new \ProductImport\Repository\FeatureMappingRepository(), new \ProductImport\Service\FeatureResolver(), $evaluator)
             );
             $result = $builder->table([
                 'id_source' => (int) $idSource,
@@ -284,6 +285,8 @@ class AdminPiSourceController extends ModuleAdminController
                 'root_category_id' => $saved['root_category_id'] ?? null,
                 'default_id_category' => $saved['default_id_category'] ?? null,
                 'default_id_manufacturer' => $saved['default_id_manufacturer'] ?? null,
+                'unmapped_features' => $saved['unmapped_features'] ?? \ProductImport\Service\FeatureMapping::UNMAPPED_IGNORE,
+                'id_lang_default' => (int) ($saved['id_lang_default'] ?? Configuration::get('PS_LANG_DEFAULT')),
                 'identifier_field' => $_POST['identifier_field'] ?? ($saved['identifier_field'] ?? ''),
                 'field_mapping' => $mapping,
                 'variant_mapping' => $variantMapping,
@@ -632,6 +635,156 @@ class AdminPiSourceController extends ModuleAdminController
     public function ajaxProcessSaveDefault()
     {
         $this->saveMappingValue(true);
+    }
+
+    /** The source of a feature-tab request; POST only. */
+    private function featureSource(string $permission): array
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            throw new InvalidArgumentException('POST required.');
+        }
+
+        return $this->requireSource($permission);
+    }
+
+    private function featureStatus(array $row, string $setting, array $names): string
+    {
+        $rule = \ProductImport\Service\FeatureMapping::effective($row);
+        switch ($rule['action']) {
+            case \ProductImport\Service\FeatureMapping::IGNORE:
+                return 'ignored';
+            case \ProductImport\Service\FeatureMapping::MAP:
+                return 'existing feature #' . $rule['id_feature'] . ' (' . ($names[$rule['id_feature']] ?? 'missing or unavailable') . ')';
+            case \ProductImport\Service\FeatureMapping::CREATE:
+                return 'creates the feature "' . $rule['create_name'] . '" with the first import, then connects it';
+        }
+
+        return $setting === \ProductImport\Service\FeatureMapping::UNMAPPED_CREATE
+            ? 'not mapped: becomes a feature named like the feed name (source setting)'
+            : 'not mapped: not imported (source setting)';
+    }
+
+    public function ajaxProcessFeatureMappings()
+    {
+        try {
+            $source = $this->featureSource('view');
+            $options = (new \ProductImport\Service\CatalogOptions())->features((int) $source['id_lang_default']);
+            $names = array_column($options, 'label', 'id_feature');
+            $setting = (string) $source['unmapped_features'];
+            $rows = [];
+            foreach ((new \ProductImport\Repository\FeatureMappingRepository())->findAllForSource((int) $source['id_source']) as $row) {
+                $samples = json_decode((string) $row['sample_values'], true);
+                $rows[] = ['key' => $row['source_name'], 'action' => $row['action'], 'id_feature' => $row['id_feature'] === null ? null : (int) $row['id_feature'],
+                    'create_name' => $row['create_name'], 'value_expression' => $row['value_expression'], 'count' => (int) $row['product_count'],
+                    'samples' => is_array($samples) ? $samples : [], 'seen' => $row['date_seen'] ?: null, 'status' => $this->featureStatus($row, $setting, $names)];
+            }
+            $this->sendJson(['setting' => $setting, 'rows' => $rows,
+                'options' => array_map(static function ($option) {
+                    return ['id' => $option['id_feature'], 'label' => $option['label']];
+                }, $options)]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+    }
+
+    /** Records the feed's feature names with product counts and samples, from the saved `features` expression over the whole feed. */
+    public function ajaxProcessDiscoverFeatures()
+    {
+        try {
+            $source = $this->featureSource('edit');
+            $mapping = json_decode($source['field_mapping'], true, 512, JSON_THROW_ON_ERROR);
+            $expression = $mapping['features'] ?? null;
+            if (!is_string($expression) || trim($expression) === '') {
+                throw new InvalidArgumentException('Save a features expression before discovery.');
+            }
+            $mapper = new \ProductImport\Service\FeatureMapper(new \ProductImport\Repository\FeatureMappingRepository(), new \ProductImport\Service\FeatureResolver(), new \ProductImport\Service\ExpressionEvaluator());
+            $result = $mapper->discover($this->cachedFeed($source)['items'], (int) $source['id_source'], $expression);
+        } catch (Throwable $error) {
+            $result = ['error' => $error->getMessage()];
+        }
+        $this->sendJson($result);
+    }
+
+    /** Saves the action, target and value formula of one row. */
+    public function ajaxProcessSaveFeatureRule()
+    {
+        try {
+            $source = $this->featureSource('edit');
+            $idSource = (int) $source['id_source'];
+            $repository = new \ProductImport\Repository\FeatureMappingRepository();
+            $key = Tools::getValue('key');
+            if (!is_string($key) || !$repository->findOverride($idSource, $key)) {
+                throw new InvalidArgumentException('Unknown feed feature.');
+            }
+            $action = Tools::getValue('rule_action');
+            if (!is_string($action) || !in_array($action, \ProductImport\Service\FeatureMapping::ACTIONS, true)) {
+                throw new InvalidArgumentException('Invalid action.');
+            }
+            $options = (new \ProductImport\Service\CatalogOptions())->features((int) $source['id_lang_default']);
+            $idFeature = null;
+            $createName = null;
+            if ($action === \ProductImport\Service\FeatureMapping::MAP) {
+                $value = Tools::getValue('feature');
+                if (!is_string($value) || !ctype_digit($value) || !in_array((int) $value, array_column($options, 'id_feature'), true)) {
+                    throw new InvalidArgumentException('Choose an existing feature.');
+                }
+                $idFeature = (int) $value;
+            } elseif ($action === \ProductImport\Service\FeatureMapping::CREATE) {
+                $createName = Tools::getValue('create_name');
+                $createName = is_string($createName) ? trim($createName) : '';
+                if ($createName === '' || mb_strlen($createName) > \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT || !\ProductImport\Service\NativeFields::isGenericName($createName)) {
+                    throw new InvalidArgumentException('Enter the name of the feature to create (1 to ' . \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT . ' characters, without <>={}).');
+                }
+            }
+            $expression = Tools::getValue('value_expression', '');
+            if (!is_string($expression) || mb_strlen($expression) > 5000) {
+                throw new InvalidArgumentException('The value formula must be text of at most 5000 characters.');
+            }
+            $expression = trim($expression);
+            if ($expression !== '' && ($problem = (new \ProductImport\Service\ExpressionEvaluator())->lint($expression, ['value', 'fields'])) !== null) {
+                throw new InvalidArgumentException('Value formula: ' . $problem);
+            }
+            $repository->setRule($idSource, $key, $action, $idFeature, $createName, $expression === '' ? null : $expression);
+            $row = $repository->findOverride($idSource, $key);
+            $this->sendJson(['ok' => true, 'status' => $this->featureStatus($row, (string) $source['unmapped_features'], array_column($options, 'label', 'id_feature'))]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+    }
+
+    /** The source setting for feed names without a mapping. */
+    public function ajaxProcessSaveFeatureSetting()
+    {
+        try {
+            $source = $this->featureSource('edit');
+            $value = Tools::getValue('value');
+            if (!is_string($value) || !in_array($value, \ProductImport\Service\FeatureMapping::UNMAPPED, true)) {
+                throw new InvalidArgumentException('Invalid setting.');
+            }
+            if (!$this->sources->update((int) $source['id_source'], ['unmapped_features' => $value])) {
+                throw new RuntimeException(\ProductImport\Repository\DbError::message('Unable to save the setting'));
+            }
+            $this->sendJson(['ok' => true]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
+    }
+
+    /** Deletes one row of this source. A feed or import that still contains the name brings it back as not mapped. */
+    public function ajaxProcessDeleteFeatureRule()
+    {
+        try {
+            $source = $this->featureSource('edit');
+            $repository = new \ProductImport\Repository\FeatureMappingRepository();
+            $key = Tools::getValue('key');
+            if (!is_string($key) || !$repository->findOverride((int) $source['id_source'], $key)) {
+                throw new InvalidArgumentException('Unknown feed feature.');
+            }
+            $repository->delete((int) $source['id_source'], $key);
+            $this->sendJson(['ok' => true]);
+        } catch (Throwable $error) {
+            $this->sendJson(['error' => $error->getMessage()]);
+        }
     }
 
     private function requireSource(string $permission): array
@@ -1175,10 +1328,12 @@ class AdminPiSourceController extends ModuleAdminController
             $idRoot = (int) Configuration::get('PS_ROOT_CATEGORY');
             $categories = new \ProductImport\Repository\CategoryMappingRepository();
             $manufacturers = new \ProductImport\Repository\ManufacturerMappingRepository();
+            $features = new \ProductImport\Repository\FeatureMappingRepository();
             $document = (new \ProductImport\Service\SourceConfigTransfer())->build(
                 $source,
                 $categories->findAllForSource($idSource),
                 $manufacturers->findAllForSource($idSource),
+                $features->findAllForSource($idSource),
                 [
                     'language_iso' => static function (int $id) {
                         $iso = Language::getIsoById($id);
@@ -1190,6 +1345,9 @@ class AdminPiSourceController extends ModuleAdminController
                     },
                     'manufacturer_name' => static function (int $id) use ($manufacturers) {
                         return $manufacturers->findName($id);
+                    },
+                    'feature_name' => static function (int $id) use ($features, $idLang) {
+                        return $features->findName($id, $idLang);
                     },
                     'supplier_name' => function (int $id) {
                         return $this->sources->findSupplierName($id);
@@ -1235,6 +1393,7 @@ class AdminPiSourceController extends ModuleAdminController
             $document = $transfer->parse($text, $overwrite);
             $categories = new \ProductImport\Repository\CategoryMappingRepository();
             $manufacturers = new \ProductImport\Repository\ManufacturerMappingRepository();
+            $features = new \ProductImport\Repository\FeatureMappingRepository();
             $idShop = (int) $this->context->shop->id;
             $children = [];
             $lookups = [
@@ -1256,6 +1415,9 @@ class AdminPiSourceController extends ModuleAdminController
                 'suppliers' => function (string $name) {
                     return $this->sources->findSupplierNamesLike($name);
                 },
+                'features' => static function (string $name, int $idLang) use ($features) {
+                    return $features->findNamesLike($name, $idLang);
+                },
             ];
             if ($overwrite) {
                 $resolved = $transfer->resolveOverwrite($document, $existing, $lookups);
@@ -1265,7 +1427,7 @@ class AdminPiSourceController extends ModuleAdminController
                 });
             }
             $normalizer = new \ProductImport\Service\CategoryPathNormalizer();
-            $counts = ['categories_created' => 0, 'categories_updated' => 0, 'brands_created' => 0, 'brands_updated' => 0];
+            $counts = ['categories_created' => 0, 'categories_updated' => 0, 'brands_created' => 0, 'brands_updated' => 0, 'features_created' => 0, 'features_updated' => 0];
             $db = Db::getInstance();
             $db->execute('START TRANSACTION');
             try {
@@ -1285,6 +1447,10 @@ class AdminPiSourceController extends ModuleAdminController
                 foreach ($resolved['brand_mappings'] as $row) {
                     $counts[$overwrite && $manufacturers->findOverride($idSource, $row['source_name']) !== null ? 'brands_updated' : 'brands_created']++;
                     $manufacturers->upsertWithOverride($idSource, $row['source_name'], $row['id_manufacturer']);
+                }
+                foreach ($resolved['feature_mappings'] as $row) {
+                    $counts[$overwrite && $features->findOverride($idSource, $row['source_name']) !== null ? 'features_updated' : 'features_created']++;
+                    $features->upsertWithRule($idSource, $row['source_name'], $row['action'], $row['id_feature'], $row['create_name'], $row['value_expression']);
                 }
                 $db->execute('COMMIT');
             } catch (Throwable $error) {

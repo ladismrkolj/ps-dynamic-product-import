@@ -233,19 +233,15 @@ class ProductImporter
         return NativeFields::listFingerprint(array_column($rows, 'id_product_2'));
     }
 
-    private static function featuresFingerprint(int $idProduct, int $idLang): string
+    /** Ids, not names: renaming a feature or correcting a value's spelling in the shop is not a manual edit. */
+    public static function featuresFingerprint(int $idProduct): string
     {
-        $rows = \Db::getInstance()->executeS(
-            'SELECT fl.`name`, fvl.`value` FROM `' . _DB_PREFIX_ . 'feature_product` fp'
-            . ' INNER JOIN `' . _DB_PREFIX_ . 'feature_lang` fl ON fl.`id_feature` = fp.`id_feature` AND fl.`id_lang` = ' . $idLang
-            . ' INNER JOIN `' . _DB_PREFIX_ . 'feature_value_lang` fvl ON fvl.`id_feature_value` = fp.`id_feature_value` AND fvl.`id_lang` = ' . $idLang
-            . ' WHERE fp.`id_product` = ' . $idProduct
-        );
+        $rows = \Db::getInstance()->executeS('SELECT `id_feature`, `id_feature_value` FROM `' . _DB_PREFIX_ . 'feature_product` WHERE `id_product` = ' . $idProduct);
         if ($rows === false) {
             throw new \RuntimeException('Unable to read product features.');
         }
 
-        return NativeFields::listFingerprint(array_map(static fn (array $row): string => $row['name'] . '=' . $row['value'], $rows));
+        return NativeFields::featuresFingerprint($rows);
     }
 
     private static function carriersFingerprint(\Product $product): string
@@ -306,7 +302,7 @@ class ProductImporter
             'delivery_time' => (string) (int) $product->additional_delivery_times,
             'additional_shipping_cost' => ImportedValues::number($product->additional_shipping_cost),
             'on_sale' => (string) (int) (bool) $product->on_sale,
-            'features' => self::featuresFingerprint((int) $product->id, $idLang),
+            'features' => self::featuresFingerprint((int) $product->id),
             'carriers' => self::carriersFingerprint($product),
             'related_products' => self::relatedFingerprint((int) $product->id),
         ];

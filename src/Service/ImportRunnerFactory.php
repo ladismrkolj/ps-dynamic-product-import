@@ -5,6 +5,7 @@ namespace ProductImport\Service;
 use ProductImport\Repository\CategoryMappingRepository;
 use ProductImport\Repository\ExternalProductRepository;
 use ProductImport\Repository\ExternalCombinationRepository;
+use ProductImport\Repository\FeatureMappingRepository;
 use ProductImport\Repository\ImportRunRepository;
 use ProductImport\Repository\SourceRepository;
 
@@ -32,7 +33,7 @@ class ImportRunnerFactory
             new SourceRepository(),
             new ImportRunRepository(),
             new ImportCatalog(),
-            new FeatureResolver(),
+            new FeatureMapper(new FeatureMappingRepository(), new FeatureResolver(), $evaluator),
             new CarrierResolver()
         );
     }

@@ -26,7 +26,7 @@ class ImportRunner
         private SourceRepository $sourceRepository,
         private ImportRunRepository $runs,
         private ImportCatalog $catalog,
-        private FeatureResolver $features,
+        private FeatureMapper $features,
         private CarrierResolver $carriers,
         private ?string $moduleVersion = null
     ) {
@@ -118,19 +118,36 @@ class ImportRunner
                         $this->log($log, "item $index: $notice");
                     }
                 }
+                $idLang = (int) $source['id_lang_default'];
+                // Features are resolved before the hash, like categories and brands: a changed mapping must re-import unchanged items.
+                $rawFeatures = $values['features'] ?? null;
+                unset($values['features']);
+                // Logged only when the item is imported: an unchanged item would repeat them every run.
+                $featureLog = [];
+                if ($rawFeatures !== null) {
+                    try {
+                        $resolved = $this->features->resolve($rawFeatures, $item, $idSource, (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE), $idLang, true);
+                        $featureLog = $resolved['warnings'];
+                        $values['features'] = $resolved['rows'];
+                    } catch (\InvalidArgumentException $error) {
+                        $featureLog[] = $error->getMessage();
+                    }
+                }
                 $idSupplier = isset($source['id_supplier']) && $source['id_supplier'] !== null ? (int) $source['id_supplier'] : null;
-                $feedHash = self::feedHash($item, $source, $categoryIds, $manufacturer, $this->moduleVersion());
+                $feedHash = self::feedHash($item, $source, $categoryIds, $manufacturer, $values['features'] ?? null, $this->moduleVersion());
                 if ($existing !== null && $this->productLinks->findFeedHash($idSource, $externalId) === $feedHash) {
                     $this->productLinks->markSeen($idSource, $externalId, $existing, $idRun);
                     ++$counts['unchanged'];
                     continue;
+                }
+                foreach ($featureLog as $warning) {
+                    $this->log($log, "item $index field features: $warning");
                 }
                 // Only changed items reach this lookup; an unchanged item keeps what it was last written with.
                 [$values, $warning] = ReferenceCheck::apply($values, $existing, fn (string $reference, ?int $except): ?int => $this->catalog->productIdByReference($reference, $except));
                 if ($warning !== null) {
                     $this->log($log, "item $index field reference: $warning");
                 }
-                $idLang = (int) $source['id_lang_default'];
                 [$values, $related] = $this->nativeValues($values, $index, $idLang, $log);
                 $idProduct = $this->products->import($idSource, $externalId, $values, $categoryIds, $manufacturer, $idSupplier, $idLang);
                 // Importers retain their existing signatures; refresh their link with this run ID.
@@ -306,8 +323,8 @@ class ImportRunner
     }
 
     /**
-     * Normalises the native-field values of one item and resolves features and carriers. Related products come back
-     * separately: they are resolved in a second pass, once every product of the run exists.
+     * Normalises the native-field values of one item and resolves carriers. Features are already resolved (see runOne). Related
+     * products come back separately: they are resolved in a second pass, once every product of the run exists.
      *
      * @return array{0: array<string, mixed>, 1: list<string>|null}
      */
@@ -332,29 +349,9 @@ class ImportRunner
             unset($values['additional_shipping_cost']);
             $this->log($log, "item $index field additional_shipping_cost: expected a number of at least 0");
         }
-        $features = $values['features'] ?? null;
         $carriers = $values['carriers'] ?? null;
         $relatedInput = $values['related_products'] ?? null;
-        unset($values['features'], $values['carriers'], $values['related_products']);
-        if ($features !== null) {
-            try {
-                $normalized = NativeFields::features($features);
-                foreach ($normalized['warnings'] as $warning) {
-                    $this->log($log, "item $index field features: $warning");
-                }
-                $rows = [];
-                foreach ($normalized['pairs'] as $name => $value) {
-                    try {
-                        $rows[] = $this->features->resolve((string) $name, $value, $idLang);
-                    } catch (\InvalidArgumentException $error) {
-                        $this->log($log, "item $index field features: \"$name\": " . $error->getMessage() . ', skipped');
-                    }
-                }
-                $values['features'] = $rows;
-            } catch (\InvalidArgumentException $error) {
-                $this->log($log, "item $index field features: " . $error->getMessage());
-            }
-        }
+        unset($values['carriers'], $values['related_products']);
         if ($carriers !== null) {
             $resolved = $this->carriers->resolve($carriers);
             foreach ($resolved['unknown'] as $entry) {
@@ -413,7 +410,7 @@ class ImportRunner
      * Fingerprint of everything that decides what an import run writes for one item. Quantity is part of the raw
      * item, so a stock change yields a new hash and stock syncs only then.
      */
-    public static function feedHash(array $item, array $source, array $categoryIds, mixed $manufacturer, string $moduleVersion): string
+    public static function feedHash(array $item, array $source, array $categoryIds, mixed $manufacturer, ?array $features, string $moduleVersion): string
     {
         $payload = [
             'item' => $item,
@@ -423,6 +420,7 @@ class ImportRunner
             'id_supplier' => isset($source['id_supplier']) ? (int) $source['id_supplier'] : null,
             'categories' => $categoryIds,
             'manufacturer' => $manufacturer,
+            'features' => $features,
             'version' => $moduleVersion,
         ];
 

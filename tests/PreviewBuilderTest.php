@@ -11,11 +11,14 @@ use ProductImport\Service\ManufacturerResolver;
 use ProductImport\Service\PreviewBuilder;
 use ProductImport\Service\ProductFieldMapper;
 use ProductImport\Service\ProductFilter;
+use ProductImport\Service\FeatureMapper;
 use ProductImport\Service\VariantFieldMapper;
+
+require_once __DIR__ . '/FeatureFakes.php';
 
 class PreviewBuilderTest extends TestCase
 {
-    private function builder(): PreviewBuilder
+    private function builder(?FakeFeatureMappings $mappings = null): PreviewBuilder
     {
         $evaluator = new ExpressionEvaluator();
         $categories = new class () extends CategoryResolver {
@@ -51,7 +54,7 @@ class PreviewBuilderTest extends TestCase
                 return ['id_attribute_group' => 1, 'id_attribute' => null, 'create_group' => false, 'create_value' => true];
             }
         };
-        return new PreviewBuilder(new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, new VariantFieldMapper($evaluator), $attributes);
+        return new PreviewBuilder(new ProductFilter($evaluator), new ProductFieldMapper($evaluator), new CategoryPathNormalizer(), $categories, $manufacturers, new VariantFieldMapper($evaluator), $attributes, new FeatureMapper($mappings ?? new FakeFeatureMappings(), new FakeFeatureResolver(), $evaluator));
     }
 
     private function build(array $source, array $item = []): array
@@ -61,7 +64,7 @@ class PreviewBuilderTest extends TestCase
 
     private function withDefaults(array $source): array
     {
-        return $source + ['id_source' => 7, 'root_category_id' => 9, 'default_id_category' => 23, 'default_id_manufacturer' => 24, 'field_mapping' => []];
+        return $source + ['id_source' => 7, 'root_category_id' => 9, 'default_id_category' => 23, 'default_id_manufacturer' => 24, 'unmapped_features' => 'create', 'id_lang_default' => 1, 'field_mapping' => []];
     }
 
     public function testTableMapsItemsWithPerCellErrorsAndVariantCounts(): void
@@ -253,5 +256,32 @@ class PreviewBuilderTest extends TestCase
             $result = $this->build(['variant_mapping' => $mapping]);
             self::assertSame(['total' => 0, 'truncated' => 0, 'items' => []], $result['variants']);
         }
+    }
+
+    public function testFeaturesColumnShowsTheFinalMappedFeaturesAndNotesWhatIsLeftOut(): void
+    {
+        $mappings = new FakeFeatureMappings();
+        $mappings->rows['Finbox'] = FakeFeatureMappings::row('Finbox', 'create', null, 'Fin box');
+        $mappings->rows['Fin Box'] = FakeFeatureMappings::row('Fin Box', 'create', null, 'Fin box');
+        $mappings->rows['Weight (kg)'] = FakeFeatureMappings::row('Weight (kg)', 'map', 6, null, "value == 'TBA' ? null : value");
+        $mappings->rows['Colour'] = FakeFeatureMappings::row('Colour', 'ignore');
+        $source = $this->withDefaults(['unmapped_features' => 'ignore', 'identifier_field' => 'id', 'field_mapping' => ['name' => 'fields["name"]', 'features' => 'fields["features"]']]);
+        $unmapped = ['a' => '1', 'b' => '2', 'c' => '3', 'd' => '4', 'e' => '5', 'f' => '6', 'g' => '7'];
+        $items = [
+            ['id' => 'A', 'name' => 'One', 'features' => ['Finbox' => 'US-BOX', 'Fin Box' => 'US-Box', 'Colour' => 'Red', 'Weight (kg)' => 'TBA'] + $unmapped],
+            ['id' => 'B', 'name' => 'Two', 'features' => ['Weight (kg)' => '12']],
+            ['id' => 'C', 'name' => 'Three', 'features' => 'text'],
+        ];
+        $rows = $this->builder($mappings)->table($source, $items)['rows'];
+        $first = $rows[0]['cells']['features'];
+        self::assertSame('Fin box: US-BOX', $first['value']);
+        self::assertNull($first['error']);
+        self::assertStringContainsString('1 ignored: Colour', $first['note']);
+        self::assertStringContainsString('7 not mapped (source setting: ignore): a, b, c, d, e, …', $first['note']);
+        self::assertStringContainsString('"Finbox" and "Fin Box" both map to the feature "Fin box"; "Finbox" is used', $first['note']);
+        self::assertSame('Weight: 12', $rows[1]['cells']['features']['value']);
+        self::assertNull($rows[1]['cells']['features']['note']);
+        self::assertSame('features must be a map of name to value, or a list of {name, value}.', $rows[2]['cells']['features']['error']);
+        self::assertSame([], $mappings->writes, 'the preview never writes');
     }
 }

@@ -50,7 +50,7 @@
     ['images', 'recommended, list of URLs', 'List of image URLs.'],
     ['main_image', '', 'Cover image URL; defaults to the first entry of images.'],
     ['related_products', 'list', 'Other products shown as related: feed IDs of this source or PrestaShop references; list. Replaces the related products unless edited by hand.', {group: 'Relations & features'}],
-    ['features', 'map or list', 'Feature name → value pairs (predefined values, auto-created); map or list.', {hint: "For a list of name/value objects use pairs(list, 'name path', 'value path'), e.g. pairs(path(fields, 'attributes.item'), '@attributes.name', '@value'). For a specification table use pick(common(list), {'feed name': 'feature name'}): common() drops per-size values."}],
+    ['features', 'map or list', 'Feed feature name → value pairs (map or list). The Features tab maps each name to a shop feature, ignores it or creates it.', {hint: "For a list of name/value objects use pairs(list, 'name path', 'value path'), e.g. pairs(path(fields, 'attributes.item'), '@attributes.name', '@value'). For a specification table use pick(common(list), {'feed name': 'feature name'}): common() drops per-size values. For a kite whose table has one row per size, add that size's row: merge(common(fields['specification_table']), row(fields['specification_table'], ['Area (m²)', 'Size', 'Volume (l)', 'Length (ft)'], path(fields, 'variants.0.size')))."}],
     ['available_now', '', 'Text shown when the product is in stock.', {group: 'Availability & delivery'}],
     ['available_later', '', 'Text shown when the product is out of stock.'],
     ['delivery_time', '', 'none, default or custom.', {quick: [['none', "'none'"], ['default', "'default'"], ['custom', "'custom'"]]}],

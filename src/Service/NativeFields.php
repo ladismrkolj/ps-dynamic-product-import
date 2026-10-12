@@ -102,31 +102,64 @@ final class NativeFields
         $pairs = [];
         $warnings = [];
         foreach ($candidates as [$name, $value]) {
-            if (!is_scalar($name) || trim((string) $name) === '' || $value === null) {
+            if (!is_scalar($name) || self::trimText((string) $name) === '' || $value === null) {
                 continue;
             }
-            $name = trim((string) $name);
-            if (!is_scalar($value)) {
-                $warnings[] = '"' . $name . '": value must be text or a number, skipped';
+            $name = self::trimText((string) $name);
+            try {
+                $text = self::featureValue($value);
+            } catch (\InvalidArgumentException $error) {
+                $warnings[] = '"' . $name . '": ' . $error->getMessage() . ', skipped';
                 continue;
             }
-            $value = trim(is_bool($value) ? ($value ? '1' : '0') : (string) $value);
-            if ($value === '') {
+            if ($text === null) {
                 continue;
             }
             if (mb_strlen($name) > self::FEATURE_NAME_LIMIT) {
                 $warnings[] = '"' . $name . '": feature name exceeds ' . self::FEATURE_NAME_LIMIT . ' characters, skipped';
                 continue;
             }
-            if (mb_strlen($value) > self::FEATURE_VALUE_LIMIT) {
-                $warnings[] = '"' . $name . '": value exceeds ' . self::FEATURE_VALUE_LIMIT . ' characters, skipped';
-                continue;
-            }
             unset($pairs[$name]);
-            $pairs[$name] = $value;
+            $pairs[$name] = $text;
         }
 
         return ['pairs' => $pairs, 'warnings' => $warnings];
+    }
+
+    /**
+     * One feature value as trimmed text: null for no value (null or empty), booleans as 1 / 0.
+     *
+     * @throws \InvalidArgumentException for a non-scalar value or one over PrestaShop's length limit
+     */
+    public static function featureValue(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_scalar($value)) {
+            throw new \InvalidArgumentException('value must be text or a number');
+        }
+        $text = self::trimText(is_bool($value) ? ($value ? '1' : '0') : (string) $value);
+        if ($text === '') {
+            return null;
+        }
+        if (mb_strlen($text) > self::FEATURE_VALUE_LIMIT) {
+            throw new \InvalidArgumentException('value exceeds ' . self::FEATURE_VALUE_LIMIT . ' characters');
+        }
+
+        return $text;
+    }
+
+    /** Pure twin of Validate::isGenericName: no < > = { }. */
+    public static function isGenericName(string $name): bool
+    {
+        return preg_match('/^[^<>={}]*$/u', $name) === 1;
+    }
+
+    /** Trims Unicode whitespace too (no-break spaces). */
+    public static function trimText(string $text): string
+    {
+        return preg_replace('/^[\\pZ\\s]+|[\\pZ\\s]+$/u', '', $text) ?? trim($text);
     }
 
     /** One string or a list of scalars as a de-duplicated list of trimmed non-empty strings. */
@@ -144,6 +177,18 @@ final class NativeFields
         }
 
         return array_values(array_unique($list));
+    }
+
+    /** @param list<array{id_feature: int|string, id_feature_value: int|string}> $rows feature_product rows */
+    public static function featuresFingerprint(array $rows): string
+    {
+        return self::listFingerprint(array_map(static fn (array $row): string => (int) $row['id_feature'] . '=' . (int) $row['id_feature_value'], $rows));
+    }
+
+    /** The name-based form used before 0.20.0, kept only so the upgrade can recognise untouched products. @param list<array{name: string, value: string}> $rows */
+    public static function legacyFeaturesFingerprint(array $rows): string
+    {
+        return self::listFingerprint(array_map(static fn (array $row): string => $row['name'] . '=' . $row['value'], $rows));
     }
 
     /** Sorted, normalised values joined for fingerprinting: order in the store or feed does not matter. */

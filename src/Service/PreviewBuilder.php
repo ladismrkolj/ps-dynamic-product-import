@@ -11,11 +11,13 @@ class PreviewBuilder
     private $manufacturers;
     private $variants;
     private $attributes;
+    private $features;
     public const VARIANT_LIMIT = 5;
     public const META_TITLE_LIMIT = 255;
     public const META_DESCRIPTION_LIMIT = 512;
     public const TABLE_LIMIT = 20;
     public const DISPLAY_LIMIT = 200;
+    public const NOTE_NAMES = 5;
 
     public function __construct(
         ProductFilter $filter,
@@ -24,7 +26,8 @@ class PreviewBuilder
         CategoryResolver $categories,
         ManufacturerResolver $manufacturers,
         VariantFieldMapper $variants,
-        AttributeResolver $attributes
+        AttributeResolver $attributes,
+        FeatureMapper $features
     ) {
         $this->filter = $filter;
         $this->mapper = $mapper;
@@ -33,6 +36,7 @@ class PreviewBuilder
         $this->manufacturers = $manufacturers;
         $this->variants = $variants;
         $this->attributes = $attributes;
+        $this->features = $features;
     }
 
     /** Mapping columns must already be decoded arrays (variant_mapping may be null). No writes. */
@@ -168,7 +172,7 @@ class PreviewBuilder
                 if ($error === null && $value !== null) {
                     $ownId = $identifier !== '' && is_scalar($item[$identifier] ?? null) ? (string) $item[$identifier] : '';
                     $ownReference = is_scalar($result['base']['values']['reference'] ?? null) ? (string) $result['base']['values']['reference'] : '';
-                    [$text, $error, $note] = $this->describe((string) $target, $value, $options, $feedIds, $ownId, $ownReference);
+                    [$text, $error, $note] = $this->describe((string) $target, $value, $options, $feedIds, $ownId, $ownReference, $source, $item);
                 } else {
                     $text = self::display($value);
                 }
@@ -207,13 +211,27 @@ class PreviewBuilder
      *
      * @return array{0: ?string, 1: ?string, 2: ?string}
      */
-    private function describe(string $target, $value, array $options, array $feedIds, string $ownId, string $ownReference): array
+    private function describe(string $target, $value, array $options, array $feedIds, string $ownId, string $ownReference, array $source, array $item): array
     {
         switch ($target) {
             case 'features':
-                $pairs = self::featurePairs($value);
+                try {
+                    $mapped = $this->features->resolve($value, $item, (int) $source['id_source'], (string) ($source['unmapped_features'] ?? FeatureMapping::UNMAPPED_IGNORE), (int) ($source['id_lang_default'] ?? 1), false);
+                } catch (\InvalidArgumentException $error) {
+                    return [self::display($value), $error->getMessage(), null];
+                }
+                $text = mb_substr(implode('; ', array_map(static fn (array $pair): string => $pair[0] . ': ' . $pair[1], $mapped['pairs'])), 0, self::DISPLAY_LIMIT);
+                $notes = [];
+                foreach (['ignored' => 'ignored', 'unmapped' => 'not mapped (source setting: ignore)'] as $key => $label) {
+                    if ($mapped[$key] !== []) {
+                        $notes[] = count($mapped[$key]) . ' ' . $label . ': ' . implode(', ', array_slice($mapped[$key], 0, self::NOTE_NAMES)) . (count($mapped[$key]) > self::NOTE_NAMES ? ', …' : '');
+                    }
+                }
+                foreach ($mapped['warnings'] as $warning) {
+                    $notes[] = $warning;
+                }
 
-                return [mb_substr(implode('; ', array_map(static fn (array $pair): string => $pair[0] . ': ' . $pair[1], $pairs)), 0, self::DISPLAY_LIMIT), null, null];
+                return [$text, null, $notes === [] ? null : implode(' · ', $notes)];
             case 'related_products':
                 $notFound = [];
                 foreach (self::listItems($value) as $entry) {
@@ -271,27 +289,6 @@ class PreviewBuilder
     private static function listText($value): string
     {
         return mb_substr(implode(', ', self::listItems($value)), 0, self::DISPLAY_LIMIT);
-    }
-
-    /** Feature [name, value] pairs from a {name: value} map or a list of {name, value}; empty names or values are dropped. */
-    private static function featurePairs($value): array
-    {
-        if (!is_array($value)) {
-            return [];
-        }
-        $pairs = [];
-        foreach ($value as $key => $entry) {
-            if (is_array($entry)) {
-                [$name, $feature] = [$entry['name'] ?? null, $entry['value'] ?? null];
-            } else {
-                [$name, $feature] = [$key, $entry];
-            }
-            if (is_scalar($name) && is_scalar($feature) && !is_bool($feature) && trim((string) $name) !== '' && trim((string) $feature) !== '') {
-                $pairs[] = [trim((string) $name), trim((string) $feature)];
-            }
-        }
-
-        return $pairs;
     }
 
     private static function display($value): ?string

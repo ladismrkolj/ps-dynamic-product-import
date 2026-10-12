@@ -18,6 +18,18 @@ class CatalogOptions
         }, $rows);
     }
 
+    /** Features by name in the language. */
+    public function features(int $idLang): array
+    {
+        $rows = \Db::getInstance()->executeS('SELECT f.`id_feature`, fl.`name` FROM `' . _DB_PREFIX_ . 'feature` f LEFT JOIN `' . _DB_PREFIX_ . 'feature_lang` fl ON fl.`id_feature` = f.`id_feature` AND fl.`id_lang` = ' . (int) $idLang . ' ORDER BY fl.`name`, f.`id_feature`');
+        if ($rows === false) {
+            throw new \RuntimeException('Unable to list features.');
+        }
+        return array_map(static function (array $row): array {
+            return ['id_feature' => (int) $row['id_feature'], 'label' => ($row['name'] ?? '(unnamed)') . ' #' . (int) $row['id_feature']];
+        }, $rows);
+    }
+
     public function manufacturers(): array
     {
         $rows = \Db::getInstance()->executeS('SELECT `id_manufacturer`, `name` FROM `' . _DB_PREFIX_ . 'manufacturer` ORDER BY `name`');

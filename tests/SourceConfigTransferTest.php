@@ -36,6 +36,9 @@ class SourceConfigTransferTest extends TestCase
             'manufacturer_name' => static function (int $id) use ($manufacturers) {
                 return $manufacturers[$id] ?? null;
             },
+            'feature_name' => static function (int $id) {
+                return [3 => 'Fin box', 4 => 'Discipline'][$id] ?? null;
+            },
             'supplier_name' => static function (int $id) {
                 return $id === 8 ? 'Acme' : null;
             },
@@ -46,9 +49,22 @@ class SourceConfigTransferTest extends TestCase
     {
         $categories = [['source_path' => '["Water","Boards"]', 'id_category' => '6'], ['source_path' => '["Misc"]', 'id_category' => null]];
         $brands = [['source_name' => 'Duotone', 'id_manufacturer' => '9'], ['source_name' => 'Other', 'id_manufacturer' => null]];
-        $document = (new SourceConfigTransfer())->build(self::source(), $categories, $brands, self::lookups(), '0.15.0', '2026-01-02T03:04:05+00:00');
+        $document = (new SourceConfigTransfer())->build(self::source(['unmapped_features' => 'create']), $categories, $brands, self::featureRows(), self::lookups(), '0.15.0', '2026-01-02T03:04:05+00:00');
 
         return SourceConfigTransfer::encode($document);
+    }
+
+    /** One row of every kind: map (feature #3), create with a formula, ignore, not mapped with a formula, not mapped, map to a feature that no longer exists. */
+    private static function featureRows(): array
+    {
+        return [
+            ['source_name' => 'Fin box', 'action' => 'map', 'id_feature' => '3', 'create_name' => null, 'value_expression' => null],
+            ['source_name' => "Weight (kg)", 'action' => 'create', 'id_feature' => null, 'create_name' => 'Weight', 'value_expression' => "value == 'TBA' ? null : value"],
+            ['source_name' => 'Colour', 'action' => 'ignore', 'id_feature' => null, 'create_name' => null, 'value_expression' => null],
+            ['source_name' => "It's", 'action' => 'none', 'id_feature' => null, 'create_name' => null, 'value_expression' => "lower(value) ~\n'after'"],
+            ['source_name' => 'Plain', 'action' => 'none', 'id_feature' => null, 'create_name' => null, 'value_expression' => null],
+            ['source_name' => 'Gone', 'action' => 'map', 'id_feature' => '99', 'create_name' => null, 'value_expression' => null],
+        ];
     }
 
     /** Store tree: Home(2) > Sport(5) > Boards(6); root is 1. */
@@ -72,6 +88,9 @@ class SourceConfigTransferTest extends TestCase
             },
             'suppliers' => static function (string $name) {
                 return $name === 'Acme' ? [8 => 'Acme'] : [];
+            },
+            'features' => static function (string $name, int $idLang) {
+                return ['Fin box' => [3 => 'Fin box'], 'Discipline' => [4 => 'Discipline']][$name] ?? [];
             },
         ];
     }
@@ -113,9 +132,104 @@ class SourceConfigTransferTest extends TestCase
         self::assertSame([['source_name' => 'Duotone', 'id_manufacturer' => 9], ['source_name' => 'Other', 'id_manufacturer' => null]], $result['brand_mappings']);
     }
 
+    public function testFeatureMappingsRoundTripThroughYaml(): void
+    {
+        $yaml = self::export();
+        self::assertStringContainsString("\nfeature_mappings:\n  'Fin box': {feature: 'Fin box'}\n", $yaml);
+        self::assertStringContainsString("  'Colour': {ignore: true}\n", $yaml);
+        self::assertStringContainsString("  'Plain': {}\n", $yaml);
+        self::assertStringContainsString("  'Gone': {}\n", $yaml, 'a feature that no longer exists is exported as not mapped');
+        $decoded = Yaml::parse($yaml);
+        self::assertSame('create', $decoded['source']['unmapped_features']);
+        self::assertSame(['create' => 'Weight', 'value' => "value == 'TBA' ? null : value"], $decoded['feature_mappings']['Weight (kg)']);
+        self::assertSame(['value' => "lower(value) ~\n'after'"], $decoded['feature_mappings']["It's"]);
+
+        $transfer = new SourceConfigTransfer();
+        $parsed = $transfer->parse($yaml);
+        $result = $transfer->resolve($parsed, self::importLookups(), static fn () => false);
+        self::assertSame([], $result['warnings']);
+        self::assertSame('create', $result['source']['unmapped_features']);
+        self::assertSame([
+            ['source_name' => 'Fin box', 'action' => 'map', 'id_feature' => 3, 'create_name' => null, 'value_expression' => null],
+            ['source_name' => 'Weight (kg)', 'action' => 'create', 'id_feature' => null, 'create_name' => 'Weight', 'value_expression' => "value == 'TBA' ? null : value"],
+            ['source_name' => 'Colour', 'action' => 'ignore', 'id_feature' => null, 'create_name' => null, 'value_expression' => null],
+            ['source_name' => "It's", 'action' => 'none', 'id_feature' => null, 'create_name' => null, 'value_expression' => "lower(value) ~\n'after'"],
+            ['source_name' => 'Plain', 'action' => 'none', 'id_feature' => null, 'create_name' => null, 'value_expression' => null],
+            ['source_name' => 'Gone', 'action' => 'none', 'id_feature' => null, 'create_name' => null, 'value_expression' => null],
+        ], $result['feature_mappings']);
+    }
+
+    public function testMissingFeatureIsSkippedWithAWarningAndSettingDefaultsToIgnore(): void
+    {
+        $yaml = self::export();
+        $document = Yaml::parse($yaml);
+        unset($document['source']['unmapped_features']);
+        $document['feature_mappings'] = ['Nothing here' => ['feature' => 'No such feature'], 'Keep' => ['ignore' => true]];
+        $transfer = new SourceConfigTransfer();
+        $result = $transfer->resolve($transfer->parse(Yaml::dump($document, 8)), self::importLookups(), static fn () => false);
+        self::assertSame('ignore', $result['source']['unmapped_features']);
+        self::assertCount(1, $result['warnings']);
+        self::assertStringContainsString('Feature mapping for "Nothing here": feature "No such feature" was not found', $result['warnings'][0]);
+        self::assertStringContainsString('left unchanged', $result['warnings'][0]);
+        self::assertSame([['source_name' => 'Keep', 'action' => 'ignore', 'id_feature' => null, 'create_name' => null, 'value_expression' => null]], $result['feature_mappings']);
+    }
+
+    public function testInvalidFeatureEntriesAreSkippedWithAWarningAndSettingDefaultFollowsFeaturesMapping(): void
+    {
+        $transfer = new SourceConfigTransfer();
+        $head = "format: productimport-source\nversion: 1\n";
+        $document = Yaml::parse(self::export());
+        $document['feature_mappings'] = ['Bad' => ['create' => 'A<b'], 'Syntax' => ['value' => 'value ==='], 'Good' => ['ignore' => true]];
+        unset($document['source']['unmapped_features']);
+        $result = $transfer->resolve($transfer->parse(Yaml::dump($document, 8)), self::importLookups(), static fn () => false);
+        self::assertCount(2, $result['warnings']);
+        self::assertStringContainsString('characters PrestaShop rejects', $result['warnings'][0]);
+        self::assertStringContainsString('value formula is invalid', $result['warnings'][1]);
+        self::assertSame(['Good'], array_column($result['feature_mappings'], 'source_name'));
+        self::assertSame('ignore', $result['source']['unmapped_features']);
+        $document['source']['field_mapping'] = ['features' => 'fields[\'f\']'];
+        $withFeatures = $transfer->resolve($transfer->parse(Yaml::dump($document, 8)), self::importLookups(), static fn () => false);
+        self::assertSame('create', $withFeatures['source']['unmapped_features']);
+    }
+
+    public function testOverwriteChangesTheSettingOnlyWhenListed(): void
+    {
+        $transfer = new SourceConfigTransfer();
+        $head = "format: productimport-source\nversion: 1\n";
+        $result = $transfer->resolveOverwrite($transfer->parse($head . "source:\n  unmapped_features: create\nfeature_mappings:\n  Fin box: {feature: Fin box, value: lower(value)}\n", true), self::existing(), self::importLookups());
+        self::assertSame('create', $result['source']['unmapped_features']);
+        self::assertSame([['source_name' => 'Fin box', 'action' => 'map', 'id_feature' => 3, 'create_name' => null, 'value_expression' => 'lower(value)']], $result['feature_mappings']);
+        $untouched = $transfer->resolveOverwrite($transfer->parse($head . "source:\n  name: Other\n", true), self::existing(), self::importLookups());
+        self::assertArrayNotHasKey('unmapped_features', $untouched['source']);
+        self::assertSame([], $untouched['feature_mappings']);
+    }
+
+    #[DataProvider('badFeatureMappings')]
+    public function testRejectsInvalidFeatureMappings(string $block, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+        (new SourceConfigTransfer())->parse("format: productimport-source\nversion: 1\n" . $block, true);
+    }
+
+    public static function badFeatureMappings(): array
+    {
+        return [
+            'list' => ["feature_mappings:\n  - a\n", 'must be a map'],
+            'two actions' => ["feature_mappings:\n  A: {ignore: true, create: B}\n", 'only one of ignore, feature and create'],
+            'ignore false' => ["feature_mappings:\n  A: {ignore: false}\n", 'ignore must be true'],
+            'unknown key' => ["feature_mappings:\n  A: {rename: B}\n", 'unknown key "rename"'],
+            'number as name' => ["feature_mappings:\n  A: {create: 12}\n", 'create must be a feature name'],
+            'formula type' => ["feature_mappings:\n  A: {value: 12}\n", 'value must be a formula'],
+            'entry type' => ["feature_mappings:\n  A: ignore\n", 'must be a mapping like'],
+            'duplicate after trim' => ["feature_mappings:\n  A: {}\n  ' A': {}\n", 'appears twice'],
+            'setting' => ["source:\n  unmapped_features: maybe\n", 'unmapped_features'],
+        ];
+    }
+
     public function testEmptyFieldMappingStaysAnObject(): void
     {
-        $document = (new SourceConfigTransfer())->build(self::source(['field_mapping' => '{}', 'variant_mapping' => null]), [], [], self::lookups(), '0.15.0', 'now');
+        $document = (new SourceConfigTransfer())->build(self::source(['field_mapping' => '{}', 'variant_mapping' => null]), [], [], [], self::lookups(), '0.15.0', 'now');
         $parsed = (new SourceConfigTransfer())->parse(SourceConfigTransfer::encode($document));
         self::assertSame('{}', $parsed['source']['field_mapping']);
         self::assertNull($parsed['source']['variant_mapping']);
@@ -346,7 +460,7 @@ class SourceConfigTransferTest extends TestCase
     {
         $source = self::source(['filter_expression' => "fields.stock > 0\n  and fields.price > 1", 'identifier_field' => '123']);
         $categories = [['source_path' => '["Sails","B"]', 'id_category' => '6'], ['source_path' => '["Misc"]', 'id_category' => null]];
-        $document = (new SourceConfigTransfer())->build($source, $categories, [['source_name' => 'Duotone', 'id_manufacturer' => '9']], self::lookups(), '0.15.0', '2026-01-02T03:04:05+00:00');
+        $document = (new SourceConfigTransfer())->build($source, $categories, [['source_name' => 'Duotone', 'id_manufacturer' => '9']], [], self::lookups(), '0.15.0', '2026-01-02T03:04:05+00:00');
         $yaml = SourceConfigTransfer::encode($document);
         self::assertSame($document, Yaml::parse($yaml));
         $parsed = (new SourceConfigTransfer())->parse($yaml);
@@ -458,7 +572,7 @@ class SourceConfigTransferTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('cannot be written in the YAML mappings');
-        (new SourceConfigTransfer())->build(self::source(), [['source_path' => '["A > B"]', 'id_category' => null]], [], self::lookups(), '0.15.0', 'now');
+        (new SourceConfigTransfer())->build(self::source(), [['source_path' => '["A > B"]', 'id_category' => null]], [], [], self::lookups(), '0.15.0', 'now');
     }
 
     public function testDestinationCategoryWithSeparatorInsideANameCannotBeExported(): void
@@ -469,7 +583,7 @@ class SourceConfigTransferTest extends TestCase
         };
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('cannot be written in the YAML mappings');
-        (new SourceConfigTransfer())->build(self::source(), [['source_path' => '["X"]', 'id_category' => '6']], [], $lookups, '0.15.0', 'now');
+        (new SourceConfigTransfer())->build(self::source(), [['source_path' => '["X"]', 'id_category' => '6']], [], [], $lookups, '0.15.0', 'now');
     }
 
     public function testLocationInYamlForUrlAndFilePathAndOverwrite(): void
@@ -503,13 +617,13 @@ class SourceConfigTransferTest extends TestCase
     public function testDeleteMissingDaysRoundTripsDefaultsAndOverwrites(): void
     {
         $transfer = new SourceConfigTransfer();
-        $document = $transfer->build(self::source(['delete_missing_days' => '45']), [], [], self::lookups(), '0.18.0', 'now');
+        $document = $transfer->build(self::source(['delete_missing_days' => '45']), [], [], [], self::lookups(), '0.18.0', 'now');
         self::assertSame(45, $document['source']['delete_missing_days']);
         $parsed = $transfer->parse(SourceConfigTransfer::encode($document));
         self::assertSame(45, $parsed['source']['delete_missing_days']);
         self::assertSame(45, $transfer->resolve($parsed, self::importLookups(), static fn () => false)['source']['delete_missing_days']);
 
-        $never = $transfer->build(self::source(['delete_missing_days' => '0']), [], [], self::lookups(), '0.18.0', 'now');
+        $never = $transfer->build(self::source(['delete_missing_days' => '0']), [], [], [], self::lookups(), '0.18.0', 'now');
         self::assertNull($never['source']['delete_missing_days']);
         $reparsed = $transfer->parse(SourceConfigTransfer::encode($never));
         self::assertNull($transfer->resolve($reparsed, self::importLookups(), static fn () => false)['source']['delete_missing_days']);
@@ -528,7 +642,7 @@ class SourceConfigTransferTest extends TestCase
     {
         $cats = [['source_path' => '["It\'s: a # b","X"]', 'id_category' => '6'], ['source_path' => '["2024"]', 'id_category' => null]];
         $brands = [['source_name' => 'Kid\'s: Co # 1', 'id_manufacturer' => '9'], ['source_name' => 'true', 'id_manufacturer' => null]];
-        $document = (new SourceConfigTransfer())->build(self::source(), $cats, $brands, self::lookups(), '0.15.0', 'now');
+        $document = (new SourceConfigTransfer())->build(self::source(), $cats, $brands, [], self::lookups(), '0.15.0', 'now');
         $yaml = SourceConfigTransfer::encode($document);
         self::assertStringContainsString("\n  'It''s: a # b > X': 'Home > Sport > Boards'\n", $yaml);
         self::assertStringContainsString("\n  '2024': ~\n", $yaml);

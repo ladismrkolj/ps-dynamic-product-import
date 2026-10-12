@@ -10,6 +10,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     <li role="presentation"><a id="pi-products-link" href="#pi-products" role="tab" aria-controls="pi-products" aria-selected="false" data-toggle="tab">Product fields</a></li>
     <li role="presentation"><a id="pi-categories-link" href="#pi-categories" role="tab" aria-controls="pi-categories" aria-selected="false">Categories</a></li>
     <li role="presentation"><a id="pi-brands-link" href="#pi-brands" role="tab" aria-controls="pi-brands" aria-selected="false">Brands</a></li>
+    <li role="presentation"><a id="pi-features-link" href="#pi-features" role="tab" aria-controls="pi-features" aria-selected="false">Features</a></li>
   </ul>
   <div class="tab-content">
     <div id="pi-general" class="tab-pane active" role="tabpanel" aria-labelledby="pi-general-link"></div>
@@ -50,7 +51,9 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
         <tr><td><code>join(list, sep)</code></td><td>Joins a list, skipping empty entries; separator defaults to <code>', '</code>: <code>join([fields['a'], fields['b']], ' / ')</code></td></tr>
         <tr><td><code>pairs(list, key, value)</code></td><td>Turns a list of objects into a name → value map, for the <code>features</code> field: <code>pairs(path(fields, 'attributes.item'), '@attributes.name', '@value')</code>. <code>key</code> and <code>value</code> are dot paths like in <code>path()</code>; entries with an empty key are skipped.</td></tr>
         <tr><td><code>common(list)</code></td><td>Merges a list of objects into one name → value map, keeping only names with the same value in every object (per-size columns are dropped): <code>common(fields['specification_table'])</code></td></tr>
-        <tr><td><code>pick(map, names)</code></td><td>Keeps the listed keys of a map in that order; <code>names</code> is a list, or a <code>{feed name: new name}</code> map that renames (first present synonym wins): <code>pick(common(fields['specification_table']), {'Discipline': 'Discipline', 'Finbox': 'Fin box', 'Fin box type': 'Fin box'})</code></td></tr>
+        <tr><td><code>pick(map, names)</code></td><td>Keeps the listed keys of a map in that order; <code>names</code> is a list, or a <code>{ldelim}feed name: new name{rdelim}</code> map that renames (first present synonym wins): <code>pick(common(fields['specification_table']), {ldelim}'Discipline': 'Discipline', 'Finbox': 'Fin box', 'Fin box type': 'Fin box'{rdelim})</code></td></tr>
+        <tr><td><code>row(list, keys, value)</code></td><td>The first object of a list in which one of the keys equals <code>value</code>, or <code>null</code>. <code>keys</code> is a key or a list of keys. Numbers compare as numbers (<code>'12.0'</code> equals <code>'12'</code>), other values as trimmed text ignoring case. For a table with one row per size: <code>row(fields['specification_table'], 'Size', path(fields, 'variants.0.size'))</code></td></tr>
+        <tr><td><code>merge(map, map, ...)</code></td><td>Combines maps; a later map overrides the keys of an earlier one, <code>null</code> arguments are skipped: <code>merge(common(fields['specification_table']), row(fields['specification_table'], 'Size', path(fields, 'variants.0.size')))</code></td></tr>
         <tr><td><code>count(list)</code></td><td>Number of entries, 0 for a missing list: <code>count(fields['images'])</code></td></tr>
         <tr><td>Quoting</td><td>Write text in single quotes. Put a backslash before a quote inside the text: <code>'it\'s'</code>. Doubling the quote (<code>'it''s'</code>) does not work. A backslash itself is written <code>\\</code>.</td></tr>
       </tbody>
@@ -58,7 +61,7 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     <p class="help-block">The text helpers return <code>null</code> for <code>null</code>, so a missing field leaves the PrestaShop field empty. <code>round</code> needs a number: wrap text in <code>num()</code>.</p>
   </details>
   <h3 id="pi-product-heading">PrestaShop product fields</h3>
-  <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images, related_products and carriers expect lists; features expects a name → value map.</p>
+  <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images, related_products and carriers expect lists; features expects a name → value map, whose names the Features tab maps to shop features.</p>
   <div id="pi-identifier-info" class="pi-identifier-info" role="group" aria-labelledby="pi-identifier-info-label" aria-disabled="true" style="opacity:.65;margin-bottom:12px;padding:8px 10px;background:#f5f5f5;border:1px solid #ddd;border-radius:3px">
     <strong id="pi-identifier-info-label">Identifier (matches products)</strong>
     <span class="help-block" style="display:inline;margin-left:8px">Internal link between this source's feed items and PrestaShop products. It is not written to the product (it shows only as the supplier reference when the source has a supplier). Use the reference field for a visible product code.</span>
@@ -97,9 +100,11 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     </div>
     <div id="pi-categories" class="tab-pane" role="tabpanel" aria-labelledby="pi-categories-link"><div id="pi-category-root"></div><div id="pi-category-mappings"></div></div>
     <div id="pi-brands" class="tab-pane" role="tabpanel" aria-labelledby="pi-brands-link"></div>
+    <div id="pi-features" class="tab-pane" role="tabpanel" aria-labelledby="pi-features-link"></div>
   </div>
 </div>
 {include file='./source_tabs_script.tpl'}
 {include file='./source_mappings_script.tpl'}
+{include file='./source_features_script.tpl'}
 {include file='./source_editor_script.tpl'}
 {/if}

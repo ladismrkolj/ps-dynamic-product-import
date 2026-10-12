@@ -15,6 +15,8 @@ class Migrations
             new FeedDirStep(),
             new DeleteMissingDaysStep(),
             new ConnectAutoCategoriesStep(),
+            new UnmappedFeaturesStep(),
+            new FeaturesFingerprintStep(),
         ];
     }
 }

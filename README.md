@@ -56,7 +56,7 @@ Every field has one Feed field select, or a formula. Selecting a feed field gene
 | `images` | List of URLs. Null and empty entries are dropped. |
 | `main_image` | Tried first. If absent, the first image is used. It can stand alone. |
 | `related_products` | List of strings (or one string). Each entry is matched first as a feed identifier of the same source, then as a PrestaShop product reference (any product). Resolved in a second pass at the end of each run, after every product exists, so a related product created in the same run works. Replaces the product's related products (accessories) unless they were edited by hand. Unmatched entries are logged as `item N field related_products: "X" not found`. A product never relates to itself. The preview notes entries that are not found yet; they may still be created by the import. |
-| `features` | Map `{feature name: value}` or a list of `{name, value}`. Predefined feature values, shared across products. Features and values are matched by exact name in the source language and auto-created when missing. Replaces the product's features unless edited by hand. Empty or null values are skipped, and names or values over PrestaShop's length limits are skipped with a log line. Use `pairs(list, keyPath, valuePath)` to turn a list of objects into a map. |
+| `features` | Map `{feed feature name: value}` or a list of `{name, value}`: the raw feed data. The **Features** tab maps each feed name to a shop feature, ignores it or creates it (see [Features](#features)); names without a mapping follow the source setting `unmapped_features`. Predefined feature values are shared across products and matched to existing values ignoring case and repeated or edge whitespace, in the source language. Replaces the product's features unless edited by hand. Empty or null values are skipped, and names or values over PrestaShop's length limits are skipped with a log line. Use `pairs(list, keyPath, valuePath)` to turn a list of objects into a map. |
 | `available_now`, `available_later` | Text shown when the product is in stock / out of stock (source language). Also combination fields. |
 | `delivery_time` | `'none'`, `'default'` or `'custom'` (0, 1 and 2 also work); stored in `additional_delivery_times`. When `delivery_in_stock` or `delivery_out_stock` is mapped without `delivery_time`, `'custom'` is used. The editor has a quick-value select. An invalid value is flagged in the preview. |
 | `delivery_in_stock`, `delivery_out_stock` | Delivery labels shown in stock / out of stock (source language). |
@@ -131,6 +131,8 @@ Formula syntax (the same table is in the **Formula syntax** toggle at the top of
 | `pairs(list, keyPath, valuePath)` | Turns a list of objects into a `{key: value}` map; both paths are dot paths like `path()`. A single object counts as a one-entry list, `null` gives `null`, and entries with an empty key are skipped: `pairs(path(fields, 'dodatneLastnosti.lastnost'), '@attributes.naziv', '@value')` |
 | `common(list)` | Merges a list of objects into one `{name: value}` map, keeping a name only when every occurrence has the same value (compared as trimmed text). Names whose values differ between objects (per-size or size-chart columns) are dropped. Null, empty and non-scalar values and non-object entries are skipped; `null` gives `{}`, a single object counts as a one-entry list, and first-seen order is kept: `common([{'Area': '7', 'Discipline': 'Freeride'}, {'Area': '8', 'Discipline': 'Freeride'}])` gives `{'Discipline': 'Freeride'}` |
 | `pick(map, names)` | Keeps only the listed keys of a map, in the order of `names`. `names` is a list of keys, or a `{feed name: new name}` map that also renames. When several feed names map to the same new name the first one present wins. Missing keys, null and empty values are skipped, and a null map gives `{}`: `pick(fields['attributes'], {'Finbox': 'Fin box', 'Fin box type': 'Fin box'})`, `pick(map, ['Discipline', 'Struts'])` |
+| `row(list, keys, value)` | The first object of a list in which one of `keys` equals `value`; `keys` is a key or a list of keys. When both sides are numeric they compare as numbers (`'12.0'` equals `'12'`), otherwise as trimmed, case-insensitive text. A single object counts as a one-entry list. Gives `null` when nothing matches or `value` or `list` is `null`: `row(fields['specification_table'], 'Size', path(fields, 'variants.0.size'))` |
+| `merge(map, map, ...)` | Combines maps: later maps override the keys of earlier ones. `null` arguments are skipped: `merge(common(fields['specification_table']), row(fields['specification_table'], 'Size', 'M'))` |
 | `count(list)` | Number of entries, 0 for a missing list: `count(fields['images'])` |
 | Quoting | Write text in single quotes. Put a backslash before a quote inside the text: `'it\'s'`. Doubling the quote (`'it''s'`) does not work. A backslash itself is written `\\`. |
 
@@ -159,7 +161,8 @@ Choose **Format: XML**. The **XML item path** is the slash-separated path from i
 - **Booleans.** Write `true` and `false` in lowercase.
 - **Discount pairs.** Apply the identical markup to `price` and `regular_price` (for example `* 1.5` on both), or the discount comparison breaks.
 - **Features from name/value objects.** `pairs(path(fields, 'dodatneLastnosti.lastnost'), '@attributes.naziv', '@value')` maps `[{'@attributes': {'naziv': 'Barva'}, '@value': 'rdeča'}, …]` to `{'Barva': 'rdeča'}`.
-- **Features from a specification table.** `pick(common(fields['specification_table']), {'Discipline': 'Discipline', 'Volume (l)': 'Volume (l)', 'Finbox': 'Fin box', 'Fin box type': 'Fin box', 'Weight (kg)': 'Weight (kg)'})`. `common()` merges the table's rows into one map and drops every name whose value differs between rows (per-size columns such as `Size` or `Head (cm)`), so only product-wide values remain. `pick()` then keeps the listed names and renames them to the feature names; synonyms listed for one feature use the first one present. A table that only has per-size columns gives no features.
+- **Features from a specification table.** `pick(common(fields['specification_table']), {'Discipline': 'Discipline', 'Volume (l)': 'Volume (l)', 'Finbox': 'Fin box', 'Fin box type': 'Fin box', 'Weight (kg)': 'Weight (kg)'})`. `common()` merges the table's rows into one map and drops every name whose value differs between rows (per-size columns such as `Size` or `Head (cm)`), so only product-wide values remain. `pick()` then keeps the listed names and renames them to the feature names; synonyms listed for one feature use the first one present. A table that only has per-size columns gives no features. With the Features tab you can instead return all names and map or rename them there.
+- **Features from a table with one row per size (a kite).** `merge(common(fields['specification_table']), row(fields['specification_table'], ['Area (m²)', 'Size', 'Volume (l)', 'Length (ft)'], path(fields, 'variants.0.size')))`: the product-wide values plus the columns of the row for this product's size.
 - **Delivery labels from days.** `delivery_in_stock`: `fields['stock_availability_time_days'] !== null ? 'Dobava v ' ~ fields['stock_availability_time_days'] ~ ' dneh' : null` (a `null` leaves the label empty). Add `delivery_time` = `'custom'`, or leave it unmapped.
 - **Carriers as a list.** `['DPD', 'Pošta Slovenije']`, or one string for a single carrier. `[]` means all carriers. Names must match the shop's carriers exactly; the editor's carrier select inserts them for you.
 - **on_sale from a regular price.** `fields['regular_price'] !== null` flags every item that carries a regular price; for a real discount use `num(fields['regular_price']) > num(fields['price'])`.
@@ -219,6 +222,31 @@ If a mapped category or brand has been deleted in the shop, the next import clea
 The root category defaults to **Home** (`PS_HOME_CATEGORY`), so new categories appear in the storefront menu. The technical Root category next to Home is used only if you select it. Changing the root does not move existing categories.
 
 Connected rows are exported to YAML like any other mapping, by category path or brand name.
+
+## Features
+
+The `features` field formula still returns the raw feed data: a `{feed name: value}` map or a list of `{name, value}`. The **Features** tab then decides, per feed feature name, what becomes of it. The mapping lives in `pi_feature_mapping` (one row per source and feed name, compared exactly and case-sensitively) and each row has an action:
+
+- **Not mapped (source setting)**: the source setting **Feed names without a mapping** (`unmapped_features`) decides. `ignore` (the default for new sources) does not import the feature. `create` makes a feature named like the feed name, which is the behaviour before 0.20.0. Upgrading sets existing sources whose field mapping has a `features` row to `create`, and all others to `ignore`.
+- **Ignore**: never imported.
+- **Existing feature**: the product gets that shop feature. If the feature is deleted in the shop, the next import clears the mapping with a log line and the name falls back to the source setting.
+- **Create as…**: the product gets a feature with the name you enter (an existing feature of that exact name in the source language is used, otherwise one is created). A committed import then **connects** the row: it becomes **Existing feature** with the feature's id, so you can rename the feature in the shop afterwards without breaking the mapping.
+
+Each row also has an optional **value formula** with the variables `value` (the feed value) and `fields` (the feed item), for example `value == 'TBA' ? null : value`. A null or empty result skips that feature for the product; an error skips it and is logged for that item like a field error. The formula applies to every row whose name is imported, including names the source setting creates.
+
+**Precedence for one product, in feed order:** the row's action decides (ignore, existing feature, create) or, without a mapping, the source setting; then the value formula runs; then the value is matched against the target feature's existing values in the source language, **ignoring case and repeated or edge whitespace**, before a new value is created (a new value keeps the first-seen spelling, so `US-BOX` and `US-Box` are one value). Several feed names, or several sources, may map to the same shop feature. If two feed names of one product end up in the same feature, the first one in feed order wins and the conflict is logged once for that item.
+
+**Discover features from full feed** evaluates the saved `features` formula over the whole feed (ignoring the filter) and records every name with its product count and up to five sample values. Imports also record names they have not seen (the **seen in feed** date), so new names appear in the tab. Mappings, the source setting and discovery save immediately, independently of the main Save button. Because the resolved features are part of the product's feed hash, changing a mapping reimports the affected products on the next run. The manual-edit protection of the `features` field works as before, and compares feature and value **ids**: renaming a feature or correcting the spelling of a value in the shop is not a manual edit and keeps syncing, while choosing a different feature or value on the product by hand is.
+
+The **preview** shows the final mapped features in the `features` column. A note lists the ignored and unmapped names (the count and the first five) and any formula error or duplicate-target conflict. The preview never writes rows, features or values.
+
+A specification table with one row per size (a kite with `Area (m²)` 7 to 14) needs the row that belongs to the product's own size. The feed item's size is `variants[0].size`:
+
+```
+merge(common(fields['specification_table']), row(fields['specification_table'], ['Area (m²)', 'Size', 'Volume (l)', 'Length (ft)'], path(fields, 'variants.0.size')))
+```
+
+`common()` keeps the values that are the same in every row and `row()` adds all columns of the matching row (`Area (m²)`, `Windrange (kts)`, …). Map the result's names on the Features tab.
 
 ## Keeping manual edits
 
@@ -293,21 +321,29 @@ The source list has an **Export** row action that downloads `<technical_key>.pro
 ```yaml
 source:
   location: https://example.com/feed.json   # URL, or a file path inside the import folder
+  unmapped_features: ignore                 # feed feature names without an entry below: ignore | create
 category_mappings:
   'Windsurf > Sails': 'Home > Boards'   # feed category path: PrestaShop path
   'Demo Fins': ~                        # ~ or null = not mapped (default, else find or create, then connect)
 brand_mappings:
   'Demo Watersports': 'Graphic Corner'
+feature_mappings:
+  'Fin box': {create: 'Fin box'}
+  'Discipline': {feature: 'Discipline'}
+  'Weight (kg)': {create: 'Weight (kg)', value: "value == 'TBA' ? null : value"}
+  'Colour': {ignore: true}
 ```
 
 Export writes every mapping key and value as a single-quoted string (a quote is doubled: `'Kid''s'`). Import also accepts unquoted values, but names that YAML would read as a number, `true`/`false` or `null` must be quoted (`'2024': 'Home'`).
 
-Paths are joined with ` > `. A category name that itself contains ` > ` cannot be written; export and import reject it. Each feed value may appear once (a duplicate key is an error). Entries for feed categories or brands the feed has not shown yet are stored as pre-mapped rows ("not seen yet" in the editor) and apply once the feed contains them.
+Paths are joined with ` > `. A category name that itself contains ` > ` cannot be written; export and import reject it. Each feed value may appear once (a duplicate key is an error). Entries for feed categories, brands or features the feed has not shown yet are stored as pre-mapped rows ("not seen yet" in the editor) and apply once the feed contains them.
+
+`feature_mappings` is keyed by the feed feature name (a name that differs only by edge spaces counts as a duplicate). Each entry is `{ignore: true}`, `{feature: 'Shop feature name'}` (an existing feature, matched exactly in the source language) or `{create: 'Name'}`, optionally with `value: 'formula'`; `{}` is a row without a mapping. At most one of `ignore`, `feature` and `create` is allowed. The source setting is `source.unmapped_features: ignore | create` (new sources without it get `ignore`). A feature that was already created and connected exports as `{feature: 'Name'}`.
 
 - **Create new source** (default) never touches existing sources. A taken key becomes `<key>_2`, `_3`, … and ` (imported)` is appended to the name.
-- **Overwrite existing source** (needs edit permission) applies the file in one transaction. Settings in the file replace the source's settings and missing ones stay. `technical_key` never changes. A present `field_mapping` or `variant_mapping` replaces the whole mapping. Each listed category or brand entry is added or updated, and entries not listed stay. `~` clears that entry (not mapped: default, else find or create, then connect). The merged source is validated like the form. Changed mappings make the next run reimport affected products.
+- **Overwrite existing source** (needs edit permission) applies the file in one transaction. Settings in the file replace the source's settings and missing ones stay. `technical_key` never changes. A present `field_mapping` or `variant_mapping` replaces the whole mapping. Each listed category, brand or feature entry is added or updated, and entries not listed stay. `~` clears that category or brand entry (not mapped: default, else find or create, then connect); a feature entry replaces the row's action and value formula as written. The merged source is validated like the form. Changed mappings make the next run reimport affected products.
 
-Names are matched in this store: categories by exact, case-sensitive path from the shop root in the source's language (each segment must match exactly one category), brands and suppliers by exact name, and the language by ISO code. Unmatched settings are left unset (new source) or unchanged (overwrite). A mapping entry whose destination category or brand does not exist is skipped with a warning: an existing row stays as it is and no row is created. Import never creates categories or brands. Files over 1 MB, unknown format or version, and invalid values are rejected.
+Names are matched in this store: categories by exact, case-sensitive path from the shop root in the source's language (each segment must match exactly one category), features by exact name in the source language, brands and suppliers by exact name, and the language by ISO code. Unmatched settings are left unset (new source) or unchanged (overwrite). A mapping entry whose destination category, brand or feature does not exist is skipped with a warning: an existing row stays as it is and no row is created. Import never creates categories, brands or features. Files over 1 MB, unknown format or version, and invalid values are rejected.
 
 ## Removing duplicate images
 

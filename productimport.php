@@ -15,7 +15,7 @@ class ProductImport extends Module
     {
         $this->name = 'productimport';
         $this->tab = 'administration';
-        $this->version = '0.19.1';
+        $this->version = '0.20.0';
         $this->author = 'Product Import';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -66,7 +66,7 @@ class ProductImport extends Module
 
     public function uninstall()
     {
-        foreach (['pi_image_source', 'pi_import_run', 'pi_external_combination', 'pi_external_product', 'pi_category_mapping', 'pi_manufacturer_mapping', 'pi_source'] as $table) {
+        foreach (['pi_image_source', 'pi_import_run', 'pi_external_combination', 'pi_external_product', 'pi_category_mapping', 'pi_manufacturer_mapping', 'pi_feature_mapping', 'pi_source'] as $table) {
             if (!Db::getInstance()->execute('DROP TABLE IF EXISTS `' . _DB_PREFIX_ . $table . '`')) {
                 return false;
             }

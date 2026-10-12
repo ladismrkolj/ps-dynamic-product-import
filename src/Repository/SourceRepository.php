@@ -121,6 +121,12 @@ class SourceRepository
                 $assignments[] = '`' . $column . '` = ' . ($data[$column] === null ? 'NULL' : (int) $data[$column]);
             }
         }
+        if (array_key_exists('unmapped_features', $data)) {
+            if (!in_array($data['unmapped_features'], \ProductImport\Service\FeatureMapping::UNMAPPED, true)) {
+                throw new \InvalidArgumentException('unmapped_features must be one of: ' . implode(', ', \ProductImport\Service\FeatureMapping::UNMAPPED));
+            }
+            $assignments[] = "`unmapped_features` = '" . pSQL($data['unmapped_features']) . "'";
+        }
         if (array_key_exists('id_supplier', $data)) {
             $assignments[] = '`id_supplier` = ' . ($data['id_supplier'] === null ? 'NULL' : (int) $data['id_supplier']);
         }

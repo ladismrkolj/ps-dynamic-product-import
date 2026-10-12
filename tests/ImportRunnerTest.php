@@ -7,7 +7,9 @@ use ProductImport\Repository\ExternalProductRepository;
 use ProductImport\Repository\ExternalCombinationRepository;
 use ProductImport\Repository\ImportRunRepository;
 use ProductImport\Repository\SourceRepository;
-use ProductImport\Service\{ProductFilter, ProductFieldMapper, CategoryPathNormalizer, CategoryResolver, ManufacturerResolver, ProductImporter, VariantFieldMapper, AttributeResolver, CombinationImporter, ImportCatalog, ImportRunner, ExpressionEvaluator, ImportedValues, FeatureResolver, CarrierResolver};
+use ProductImport\Service\{ProductFilter, ProductFieldMapper, CategoryPathNormalizer, CategoryResolver, ManufacturerResolver, ProductImporter, VariantFieldMapper, AttributeResolver, CombinationImporter, ImportCatalog, ImportRunner, ExpressionEvaluator, ImportedValues, FeatureMapper, CarrierResolver};
+
+require_once __DIR__ . '/FeatureFakes.php';
 
 class ImportRunnerTest extends TestCase
 {
@@ -16,7 +18,7 @@ class ImportRunnerTest extends TestCase
         $state = $sharedState ?? (object) ['products' => ['old' => ['external_id' => 'old', 'id_product' => 10, 'id_run_last_seen' => null], 'stale' => ['external_id' => 'stale', 'id_product' => 11, 'id_run_last_seen' => 1]],
             'combinations' => ['old:stale' => ['id_product' => 10, 'id_product_attribute' => 50, 'id_run_last_seen' => null]],
             'triggers' => [], 'deactivated' => [], 'zeroed' => [], 'finished' => [], 'prices' => [], 'staleCalls' => 0, 'emptyStreakUpdates' => [],
-            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => [], 'related' => [], 'featureCalls' => [], 'relatedFails' => [],
+            'activeInStore' => [], 'importValues' => [], 'variantFields' => [], 'references' => [], 'savedImportedValues' => [], 'imports' => [], 'missing' => [], 'related' => [], 'featureMappings' => new FakeFeatureMappings(), 'featureResolver' => new FakeFeatureResolver(), 'relatedFails' => [],
             'tombstoneCalls' => [], 'otherLinks' => [], 'deletedProducts' => [], 'forgotten' => []];
         $fetcher = static function (array $source) use ($items, $fetchFails): array {
             if ($fetchFails) {
@@ -262,19 +264,7 @@ class ImportRunnerTest extends TestCase
                 $this->state->deletedProducts[] = $idProduct;
             }
         };
-        $features = new class ($state) extends FeatureResolver {
-            public function __construct(private object $state)
-            {
-            }
-            public function resolve(string $name, string $value, int $idLang): array
-            {
-                if ($value === 'bad<value>') {
-                    throw new \InvalidArgumentException('feature value contains characters PrestaShop rejects (<>={})');
-                }
-                $this->state->featureCalls[] = [$name, $value, $idLang];
-                return ['id_feature' => count($this->state->featureCalls), 'id_feature_value' => 100 + count($this->state->featureCalls)];
-            }
-        };
+        $features = new FeatureMapper($state->featureMappings, $state->featureResolver, new ExpressionEvaluator());
         $carriers = new class () extends CarrierResolver {
             public function __construct()
             {
@@ -698,11 +688,12 @@ class ImportRunnerTest extends TestCase
     public function testFeedHashIgnoresKeyOrderButNotValues(): void
     {
         $source = $this->source();
-        $a = ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 4, '1');
-        self::assertSame($a, ImportRunner::feedHash(['b' => ['y' => 2, 'x' => 1], 'a' => 1], $source, [3], 4, '1'));
-        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 3]], $source, [3], 4, '1'));
-        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 5, '1'));
-        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 4, '2'));
+        $a = ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 4, null, '1');
+        self::assertSame($a, ImportRunner::feedHash(['b' => ['y' => 2, 'x' => 1], 'a' => 1], $source, [3], 4, null, '1'));
+        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 3]], $source, [3], 4, null, '1'));
+        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 5, null, '1'));
+        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 4, null, '2'));
+        self::assertNotSame($a, ImportRunner::feedHash(['a' => 1, 'b' => ['x' => 1, 'y' => 2]], $source, [3], 4, [['id_feature' => 5, 'id_feature_value' => 7]], '1'));
     }
 
     public function testInvalidEan13IsDroppedAndLogged(): void
@@ -739,7 +730,7 @@ class ImportRunnerTest extends TestCase
 
     private function nativeSource(array $mapping): array
     {
-        return $this->source(['field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]'] + $mapping]);
+        return $this->source(['unmapped_features' => 'create', 'field_mapping' => ['name' => '"Board"', 'category_paths' => '["Boards"]'] + $mapping]);
     }
 
     public function testNativeFieldsAreNormalisedAndResolved(): void
@@ -753,8 +744,8 @@ class ImportRunnerTest extends TestCase
             'additional_shipping_cost' => '-1',
         ]), 'admin-manual');
         $values = $state->importValues['new'];
-        self::assertSame([['id_feature' => 1, 'id_feature_value' => 101]], $values['features']);
-        self::assertSame([['Color', 'Red', 1]], $state->featureCalls);
+        self::assertSame([['id_feature' => 101, 'id_feature_value' => 1001]], $values['features']);
+        self::assertSame([['Color', 'Red', 1]], $state->featureResolver->calls);
         self::assertSame([7, 9], $values['carriers']);
         self::assertSame(2, $values['delivery_time']);
         self::assertSame(255, mb_strlen($values['meta_title']));
@@ -763,6 +754,97 @@ class ImportRunnerTest extends TestCase
         self::assertStringContainsString('item 0 field meta_title: truncated to 255 characters', $result['error_log']);
         self::assertStringContainsString('item 0 field features: "Bad": feature value contains characters PrestaShop rejects', $result['error_log']);
         self::assertStringContainsString('item 0 field additional_shipping_cost: expected a number of at least 0', $result['error_log']);
+    }
+
+    private function featureItem(array $props): array
+    {
+        return ['id' => 'new', 'props' => array_map(static fn (string $name, string $value): array => ['n' => $name, 'v' => $value], array_keys($props), array_values($props))];
+    }
+
+    private function featureSource(array $overrides = []): array
+    {
+        return $overrides + $this->nativeSource(['features' => 'pairs(path(fields, "props"), "n", "v")']);
+    }
+
+    public function testFeatureMappingRulesDecideWhatIsImportedAndCreatedFeaturesAreConnected(): void
+    {
+        [$runner, $state] = $this->fixture([$this->featureItem(['Finbox' => 'US-BOX', 'Colour' => 'Red', 'Weight (kg)' => 'TBA', 'Discipline' => 'Freeride', 'Size' => 'M'])]);
+        $rows = &$state->featureMappings->rows;
+        $rows['Finbox'] = FakeFeatureMappings::row('Finbox', 'create', null, 'Fin box');
+        $rows['Colour'] = FakeFeatureMappings::row('Colour', 'ignore');
+        $rows['Weight (kg)'] = FakeFeatureMappings::row('Weight (kg)', 'create', null, 'Weight', "value == 'TBA' ? null : value");
+        $rows['Size'] = FakeFeatureMappings::row('Size', 'map', 6);
+        $result = $runner->runOne($this->featureSource(['unmapped_features' => 'ignore']), 'admin-manual');
+        self::assertSame('completed', $result['status'], $result['error_log']);
+        self::assertSame([['Fin box', 'US-BOX', 1], [6, 'M', 1]], $state->featureResolver->calls);
+        self::assertSame([['id_feature' => 5, 'id_feature_value' => 1001], ['id_feature' => 6, 'id_feature_value' => 1002]], $state->importValues['new']['features']);
+        self::assertSame('map', $rows['Finbox']['action'], 'the created feature is connected');
+        self::assertSame(5, $rows['Finbox']['id_feature']);
+        self::assertNull($rows['Finbox']['create_name']);
+        self::assertSame('create', $rows['Weight (kg)']['action'], 'a skipped value connects nothing');
+        self::assertSame('none', $rows['Discipline']['action'], 'an unseen name becomes a row without a mapping');
+        self::assertContains('seen:Discipline', $state->featureMappings->writes);
+        self::assertStringNotContainsString('field features', $result['error_log']);
+    }
+
+    public function testUnmappedFeatureNamesFollowTheSourceSetting(): void
+    {
+        [$runner, $state] = $this->fixture([$this->featureItem(['Discipline' => 'Freeride'])]);
+        $runner->runOne($this->featureSource(['unmapped_features' => 'ignore']), 'admin-manual');
+        self::assertSame([], $state->importValues['new']['features'], 'every name ignored: the product gets no features');
+        self::assertSame([], $state->featureResolver->calls);
+        [$runner, $state] = $this->fixture([$this->featureItem(['Discipline' => 'Freeride'])]);
+        $runner->runOne($this->featureSource(['unmapped_features' => 'create']), 'admin-manual');
+        self::assertSame([['Discipline', 'Freeride', 1]], $state->featureResolver->calls);
+        self::assertSame('none', $state->featureMappings->rows['Discipline']['action'], 'the setting does not connect the name');
+    }
+
+    public function testTwoFeedNamesForOneFeatureKeepTheFirstAndLogOnce(): void
+    {
+        [$runner, $state] = $this->fixture([$this->featureItem(['Finbox' => 'US-BOX', 'Fin Box' => 'US-Box', 'Fin box' => 'Slot'])]);
+        foreach (['Finbox', 'Fin Box', 'Fin box'] as $name) {
+            $state->featureMappings->rows[$name] = FakeFeatureMappings::row($name, 'create', null, 'Fin box');
+        }
+        $result = $runner->runOne($this->featureSource(), 'admin-manual');
+        self::assertSame([['id_feature' => 5, 'id_feature_value' => 1001]], $state->importValues['new']['features']);
+        self::assertSame(1, substr_count($result['error_log'], 'item 0 field features: several feed names map to one feature'));
+        self::assertStringContainsString('"Finbox" and "Fin Box" both map to the feature "Fin box"; "Finbox" is used', $result['error_log']);
+        self::assertStringContainsString('"Finbox" and "Fin box" both map', $result['error_log']);
+    }
+
+    public function testMappedFeatureThatNoLongerExistsFallsBackToTheSetting(): void
+    {
+        [$runner, $state] = $this->fixture([$this->featureItem(['Size' => 'M'])]);
+        $state->featureMappings->rows['Size'] = FakeFeatureMappings::row('Size', 'map', 99);
+        $result = $runner->runOne($this->featureSource(['unmapped_features' => 'ignore']), 'admin-manual');
+        self::assertSame([], $state->importValues['new']['features']);
+        self::assertSame('none', $state->featureMappings->rows['Size']['action']);
+        self::assertStringContainsString('item 0 field features: "Size": mapped feature #99 no longer exists, mapping cleared', $result['error_log']);
+    }
+
+    public function testValueFormulaErrorsAreLoggedPerItemAndSkipOnlyThatFeature(): void
+    {
+        [$runner, $state] = $this->fixture([$this->featureItem(['Colour' => 'Red', 'Size' => 'M'])]);
+        $state->featureMappings->rows['Colour'] = FakeFeatureMappings::row('Colour', 'create', null, 'Colour', 'fields[');
+        $state->featureMappings->rows['Size'] = FakeFeatureMappings::row('Size', 'create', null, 'Size', 'upper(value)');
+        $result = $runner->runOne($this->featureSource(), 'admin-manual');
+        self::assertSame([['Size', 'M', 1]], array_map(static fn (array $call): array => [$call[0], $call[1], $call[2]], $state->featureResolver->calls));
+        self::assertStringContainsString('item 0 field features: value formula of Colour:', $result['error_log']);
+    }
+
+    public function testChangingAFeatureMappingReimportsAnUnchangedItem(): void
+    {
+        $items = [$this->featureItem(['Colour' => 'Red', 'Size' => 'M'])];
+        [$runner, $state] = $this->fixture($items);
+        $source = $this->featureSource(['unmapped_features' => 'create']);
+        self::assertSame(1, $runner->runOne($source, 'admin-manual')['counts']['created']);
+        [$again] = $this->fixture($items, false, $state);
+        self::assertSame(1, $again->runOne($source, 'admin-manual')['counts']['unchanged']);
+        $state->featureMappings->rows['Colour'] = FakeFeatureMappings::row('Colour', 'ignore');
+        [$third] = $this->fixture($items, false, $state);
+        $result = $third->runOne($source, 'admin-manual');
+        self::assertSame(0, $result['counts']['unchanged']);
+        self::assertSame(1, $result['counts']['updated']);
     }
 
     public function testCarriersOnlyUnknownAreNotWrittenButEmptyListMeansAll(): void
