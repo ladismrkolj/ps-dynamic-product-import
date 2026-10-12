@@ -291,12 +291,21 @@ class ExpressionEvaluator
     }
 
     /**
-     * The first object of a list (a single object counts as a one-entry list) in which one of the keys equals $value.
-     * Compared as numbers when both sides are numeric ('12.0' equals '12'), otherwise as trimmed, case-insensitive text.
-     * Null when nothing matches or $list or $value is null.
+     * row(list, keys, value): the first object of a list (a single object counts as a one-entry list) in which one of the
+     * keys equals $value; numbers compare as numbers ('12.0' equals '12'), other values as trimmed, case-insensitive text.
+     *
+     * row(list, value): automatic key columns. Only object rows count. A column is a key column when every row has it and
+     * its normalised values (numeric-aware, '5,5' equals '5.5', trimmed, case-insensitive) are all different across the
+     * rows, so constant or repeating columns are ignored. The row in which a key column equals $value is returned when
+     * exactly one row matches; none or several give null. With a single row every column is distinct, so that row is
+     * returned when any of its values equals $value.
+     *
+     * A leading BOM is removed from keys and (in the automatic form) values. Null when $list or $value is null.
      */
-    public static function row($list, $keys, $value): ?array
+    public static function row($list, $keysOrValue, $value = null): ?array
     {
+        $automatic = func_num_args() === 2;
+        $value = $automatic ? $keysOrValue : $value;
         if ($list === null || $value === null) {
             return null;
         }
@@ -306,25 +315,76 @@ class ExpressionEvaluator
         if (!is_scalar($value) || is_bool($value)) {
             throw new \InvalidArgumentException('row() expects text or a number to look for.');
         }
-        $keys = is_array($keys) ? $keys : [$keys];
-        foreach ($keys as $key) {
-            if (!is_scalar($key) || is_bool($key)) {
-                throw new \InvalidArgumentException('row() expects a key or a list of keys.');
+        $rows = [];
+        foreach (array_is_list($list) ? $list : [$list] as $entry) {
+            if (is_array($entry)) {
+                $clean = [];
+                foreach ($entry as $key => $cell) {
+                    $clean[self::stripBom((string) $key)] = $cell;
+                }
+                $rows[] = $clean;
             }
         }
-        foreach (array_is_list($list) ? $list : [$list] as $entry) {
-            if (!is_array($entry)) {
-                continue;
-            }
+        if (!$automatic) {
+            $keys = is_array($keysOrValue) ? $keysOrValue : [$keysOrValue];
             foreach ($keys as $key) {
-                $candidate = $entry[(string) $key] ?? null;
-                if (is_scalar($candidate) && !is_bool($candidate) && self::sameValue($candidate, $value)) {
-                    return $entry;
+                if (!is_scalar($key) || is_bool($key)) {
+                    throw new \InvalidArgumentException('row() expects a key or a list of keys.');
                 }
+            }
+            foreach ($rows as $entry) {
+                foreach ($keys as $key) {
+                    $candidate = $entry[self::stripBom((string) $key)] ?? null;
+                    if (is_scalar($candidate) && !is_bool($candidate) && self::sameValue($candidate, $value)) {
+                        return $entry;
+                    }
+                }
+            }
+
+            return null;
+        }
+        if ($rows === []) {
+            return null;
+        }
+        $wanted = self::autoKey($value);
+        $columns = array_keys($rows[0]);
+        $matches = [];
+        foreach ($columns as $column) {
+            $seen = [];
+            foreach ($rows as $at => $entry) {
+                $cell = $entry[$column] ?? null;
+                if (!is_scalar($cell) || is_bool($cell) || trim((string) $cell) === '') {
+                    continue 2;
+                }
+                $key = self::autoKey($cell);
+                if (isset($seen[$key])) {
+                    continue 2;
+                }
+                $seen[$key] = $at;
+            }
+            if (isset($seen[$wanted])) {
+                $matches[$seen[$wanted]] = true;
             }
         }
 
-        return null;
+        return count($matches) === 1 ? $rows[array_key_first($matches)] : null;
+    }
+
+    private static function stripBom(string $text): string
+    {
+        return str_starts_with($text, "\xEF\xBB\xBF") ? substr($text, 3) : $text;
+    }
+
+    /** Comparison key of the automatic row(): numbers by value, other text trimmed and lower case. */
+    private static function autoKey($value): string
+    {
+        $text = trim(self::stripBom((string) $value));
+        $number = str_replace(',', '.', $text);
+        if (preg_match('/^-?\d+(\.\d+)?$/', $number) === 1) {
+            return 'n:' . (float) $number;
+        }
+
+        return 's:' . mb_strtolower((string) self::trim($text), 'UTF-8');
     }
 
     /**

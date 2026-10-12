@@ -78,6 +78,7 @@ class FormulaReferenceTest extends TestCase
             'common' => ["common(fields['specification_table'])", $fields, ['Colour' => 'Blue', 'Weight' => '3']],
             'pick' => ["pick(common(fields['specification_table']), {'Colour': 'Color'})", $fields, ['Color' => 'Blue']],
             'row' => ["row(fields['specification_table'], 'Size', path(fields, 'variants.0.size'))", $fields, ['Size' => '12.0', 'Colour' => 'Blue', 'Weight' => '3']],
+            'row auto' => ["row(fields['specification_table'], 12)", $fields, ['Size' => '12.0', 'Colour' => 'Blue', 'Weight' => '3']],
             'merge' => ["merge(common(fields['specification_table']), row(fields['specification_table'], 'Size', '9'))", $fields, ['Colour' => 'Blue', 'Weight' => '3', 'Size' => '9']],
             'count' => ["count(fields['images'])", $fields, 2],
             'table' => ["table(fields['specification_table'])", $fields, '<table><thead><tr><th>Size</th><th>Colour</th><th>Weight</th></tr></thead><tbody><tr><td>9</td><td>Blue</td><td></td></tr><tr><td>12.0</td><td>Blue</td><td>3</td></tr></tbody></table>'],

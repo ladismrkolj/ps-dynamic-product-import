@@ -88,7 +88,7 @@
     ['available_now', '', 'Text shown when the combination is in stock.'],
     ['available_later', '', 'Text shown when the combination is out of stock.'],
     ['image', '', 'Combination image URL.'],
-    ['features', 'map or list', 'Features of this variant ({feed name: value} map or list of {name, value}), added to the product\'s features: every distinct value across the variants is kept (several values per feature). Names go through the Features tab.', {hint: "Examples: row(fields['specification_table'], ['Area (m²)'], variant['size'])  or  pairs(path(variant, 'attrs'), 'name', 'value')"}]
+    ['features', 'map or list', 'Features of this variant ({feed name: value} map or list of {name, value}), added to the product\'s features: every distinct value across the variants is kept (several values per feature). Names go through the Features tab.', {hint: "Examples: row(fields['specification_table'], variant['size'])  or  row(fields['specification_table'], ['Area (m²)'], variant['size'])  or  pairs(path(variant, 'attrs'), 'name', 'value')"}]
   ];
 
   function quote(value) {

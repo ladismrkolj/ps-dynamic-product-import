@@ -119,4 +119,27 @@ class ExpressionEvaluatorTest extends TestCase
             }
         }
     }
+
+    public function testAutomaticRowUsesDistinctKeyColumns(): void
+    {
+        $table = [
+            ["\u{FEFF}EU" => '40', 'Size' => '5,5', 'Struts' => '3'],
+            ["\u{FEFF}EU" => '41', 'Size' => '6', 'Struts' => '3'],
+            ["\u{FEFF}EU" => '42', 'Size' => 'M', 'Struts' => '3'],
+        ];
+        self::assertSame('41', ExpressionEvaluator::row($table, '41.0')['EU']);
+        self::assertSame('40', ExpressionEvaluator::row($table, '5.5')['EU'], 'comma decimals');
+        self::assertSame('42', ExpressionEvaluator::row($table, ' m ')['EU'], 'text, trimmed, case-insensitive');
+        self::assertNull(ExpressionEvaluator::row($table, '3'), 'a constant column is not a key');
+        self::assertNull(ExpressionEvaluator::row($table, '99'));
+        self::assertNull(ExpressionEvaluator::row($table, null));
+        self::assertArrayHasKey('EU', ExpressionEvaluator::row($table, "\u{FEFF}40"), 'BOM stripped from keys');
+        $ambiguous = [['A' => '1', 'B' => '2'], ['A' => '2', 'B' => '3']];
+        self::assertNull(ExpressionEvaluator::row($ambiguous, '2'), 'two rows match');
+        self::assertSame(['A' => '1', 'B' => '2'], ExpressionEvaluator::row($ambiguous, '1'));
+        self::assertSame(['A' => '9'], ExpressionEvaluator::row([['A' => '9']], 9), 'single row');
+        self::assertNull(ExpressionEvaluator::row([['A' => '9']], 8));
+        self::assertSame(['Size' => 'S'], ExpressionEvaluator::row([['Size' => 'S'], 'junk', null], 's'));
+        self::assertSame(['EU' => '40'], ExpressionEvaluator::row([["\u{FEFF}EU" => '40']], '40', ));
+    }
 }
