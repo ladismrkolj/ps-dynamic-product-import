@@ -24,6 +24,12 @@ class AdminPiSourceController extends ModuleAdminController
         $this->sources = new SourceRepository();
     }
 
+    public function setMedia($isNewTheme = false)
+    {
+        parent::setMedia($isNewTheme);
+        $this->addCSS(_MODULE_DIR_ . 'productimport/views/css/admin.css?v=' . (int) @filemtime(dirname(__DIR__, 3) . '/views/css/admin.css'));
+    }
+
     public function postProcess()
     {
         $actions = ['runImport' => 'ajaxProcessRunImport', 'importStatus' => 'ajaxProcessImportStatus', 'sampleValues' => 'ajaxProcessSampleValues', 'previewTable' => 'ajaxProcessPreviewTable', 'inspect' => 'ajaxProcessInspect', 'discoverCategories' => 'ajaxProcessDiscoverCategories', 'mappings' => 'ajaxProcessMappings', 'featureMappings' => 'ajaxProcessFeatureMappings', 'discoverFeatures' => 'ajaxProcessDiscoverFeatures', 'exportSource' => 'ajaxProcessExportSource', 'importSource' => 'ajaxProcessImportSource'];
@@ -509,15 +515,22 @@ class AdminPiSourceController extends ModuleAdminController
         return [$source, $category, $options, $names, $idColumn];
     }
 
-    private function mappingStatus(?int $id, $default, array $names, bool $category): string
+    /** Name without the tree dashes and without the trailing " #id" of an option label. */
+    private static function plainName(string $label): string
+    {
+        return trim((string) preg_replace('/\s+#\d+$/', '', (string) preg_replace('/^[—\s-]+/u', '', $label)));
+    }
+
+    /** @return array{status: string, badge: string, kind: string, detail: string} full text for search and hover, short badge and a muted detail */
+    private function mappingStatus(?int $id, $default, array $names, bool $category): array
     {
         if ($id === null) {
-            if ($default !== null) {
-                return 'source default #' . $default;
-            }
-            return 'not mapped (default, else find or create, then connect)';
+            $detail = $default !== null ? '→ source default #' . $default : '→ found or created by name';
+            return ['status' => 'not mapped ' . $detail, 'badge' => 'Not mapped', 'kind' => 'off', 'detail' => $detail];
         }
-        return 'existing ' . ($category ? 'category' : 'manufacturer') . ' #' . $id . ' (' . ($names[$id] ?? 'missing or unavailable') . ')';
+        $label = $names[$id] ?? null;
+        $detail = $label === null ? 'missing or unavailable #' . $id : self::plainName($label) . ' #' . $id;
+        return ['status' => 'existing ' . ($category ? 'category' : 'manufacturer') . ' ' . ($label ?? '#' . $id), 'badge' => $label === null ? 'Missing' : 'Mapped', 'kind' => $label === null ? 'warn' : 'ok', 'detail' => $detail];
     }
 
     public function ajaxProcessMappings()
@@ -533,7 +546,7 @@ class AdminPiSourceController extends ModuleAdminController
                 $id = $row[$idColumn] === null ? null : (int) $row[$idColumn];
                 $rows[] = ['stale' => $stale['stale'][$at], 'mapped' => $id !== null, 'key' => $category ? $row['source_path_hash'] : $row['source_name'],
                     'label' => $category ? implode(' > ', json_decode($row['source_path'], true, 512, JSON_THROW_ON_ERROR)) : $row['source_name'],
-                    'id' => $id, 'seen' => $row['date_seen'] ?: null, 'status' => $this->mappingStatus($id, $default, $names, $category)];
+                    'id' => $id, 'seen' => $row['date_seen'] ?: null] + $this->mappingStatus($id, $default, $names, $category);
             }
             $this->sendJson(['default' => $default === null ? null : (int) $default, 'rows' => $rows, 'stale_cutoff' => $stale['cutoff'], 'stale_hours' => \ProductImport\Service\StaleMappingRows::WINDOW_SECONDS / 3600,
                 'options' => array_map(static function ($option) use ($idColumn) {
@@ -554,21 +567,22 @@ class AdminPiSourceController extends ModuleAdminController
         return $this->requireSource($permission);
     }
 
-    private function featureStatus(array $row, string $setting, array $names): string
+    /** @return array{status: string, badge: string, kind: string, detail: string} */
+    private function featureStatus(array $row, string $setting, array $names): array
     {
         $rule = \ProductImport\Service\FeatureMapping::effective($row);
         switch ($rule['action']) {
             case \ProductImport\Service\FeatureMapping::IGNORE:
-                return 'ignored';
+                return ['status' => 'ignored', 'badge' => 'Ignored', 'kind' => 'warn', 'detail' => ''];
             case \ProductImport\Service\FeatureMapping::MAP:
-                return 'existing feature #' . $rule['id_feature'] . ' (' . ($names[$rule['id_feature']] ?? 'missing or unavailable') . ')';
+                $label = $names[$rule['id_feature']] ?? null;
+                return ['status' => 'existing feature #' . $rule['id_feature'] . ' (' . ($label ?? 'missing or unavailable') . ')', 'badge' => $label === null ? 'Missing' : 'Mapped',
+                    'kind' => $label === null ? 'warn' : 'ok', 'detail' => $label === null ? 'missing or unavailable #' . $rule['id_feature'] : self::plainName($label) . ' #' . $rule['id_feature']];
             case \ProductImport\Service\FeatureMapping::CREATE:
-                return 'creates the feature "' . $rule['create_name'] . '" with the first import, then connects it';
+                return ['status' => 'creates the feature "' . $rule['create_name'] . '"', 'badge' => 'Create', 'kind' => 'ok', 'detail' => $rule['create_name'] . ' (on the next import)'];
         }
-
-        return $setting === \ProductImport\Service\FeatureMapping::UNMAPPED_CREATE
-            ? 'not mapped: becomes a feature named like the feed name (source setting)'
-            : 'not mapped: not imported (source setting)';
+        $created = $setting === \ProductImport\Service\FeatureMapping::UNMAPPED_CREATE;
+        return ['status' => 'not mapped' . ($created ? ' becomes a feature named like the feed name' : ' not imported'), 'badge' => 'Not mapped', 'kind' => 'off', 'detail' => $created ? '→ created by name (setting)' : '→ ignored (setting)'];
     }
 
     public function ajaxProcessFeatureMappings()
@@ -585,7 +599,7 @@ class AdminPiSourceController extends ModuleAdminController
                 $samples = json_decode((string) $row['sample_values'], true);
                 $rows[] = ['stale' => $stale['stale'][$at], 'mapped' => $row['action'] !== 'none', 'key' => $row['source_name'], 'action' => $row['action'], 'id_feature' => $row['id_feature'] === null ? null : (int) $row['id_feature'],
                     'create_name' => $row['create_name'], 'value_expression' => $row['value_expression'], 'count' => (int) $row['product_count'],
-                    'samples' => is_array($samples) ? $samples : [], 'seen' => $row['date_seen'] ?: null, 'status' => $this->featureStatus($row, $setting, $names)];
+                    'samples' => is_array($samples) ? $samples : [], 'variant_count' => (int) $row['variant_count'], 'variant_samples' => is_array($vs = json_decode((string) $row['variant_samples'], true)) ? $vs : [], 'seen' => $row['date_seen'] ?: null] + $this->featureStatus($row, $setting, $names);
             }
             $this->sendJson(['setting' => $setting, 'rows' => $rows, 'stale_cutoff' => $stale['cutoff'], 'stale_hours' => \ProductImport\Service\StaleMappingRows::WINDOW_SECONDS / 3600,
                 'options' => array_map(static function ($option) {

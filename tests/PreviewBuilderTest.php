@@ -293,7 +293,7 @@ class PreviewBuilderTest extends TestCase
                 'fields' => ['reference' => 'variant["sku"]', 'features' => "{'Area': variant['size']}"]]]);
         $items = [['id' => 'A', 'name' => 'Kite', 'variants' => [['sku' => 'a', 'size' => '7'], ['sku' => 'b', 'size' => '9'], ['sku' => 'c', 'size' => '7']]]];
         $row = $this->builder()->table($source, $items)['rows'][0];
-        self::assertSame('Area: 7, 9', $row['cells']['features']['value']);
+        self::assertSame('Area: 7 [V], 9 [V]', $row['cells']['features']['value']);
         self::assertSame('{"Area":"7"}', $row['variants']['items'][0]['cells']['features']['value']);
     }
 }

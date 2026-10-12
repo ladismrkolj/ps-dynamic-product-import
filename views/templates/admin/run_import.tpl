@@ -8,8 +8,8 @@
     <option value="{$source.id_source|intval}" data-name="{$source.name|escape:'html':'UTF-8'}" data-deactivate="{$source.deactivate_missing|intval}">{$source.name|escape:'html':'UTF-8'}{if !$source.active} (inactive){/if}</option>
     {/foreach}
   </select>
-  <button type="button" id="pi-run-list-button" class="btn btn-default">Run import now</button>
-  <button type="button" id="pi-run-list-overwrite" class="btn btn-default" data-overwrite="1">Run and overwrite manual edits</button>
+  <button type="button" id="pi-run-list-button" class="btn btn-primary">Run import now</button>
+  <button type="button" id="pi-run-list-overwrite" class="btn btn-outline-danger" data-overwrite="1">Run and overwrite manual edits</button>
   </div>
   <div id="pi-run-list-results" aria-live="polite"></div>
 </div>

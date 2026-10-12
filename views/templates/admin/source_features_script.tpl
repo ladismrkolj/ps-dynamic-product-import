@@ -70,9 +70,11 @@
     }
 
     function render(data, notice) {
-      pane.appendChild(element('p', '', data.rows.length + ' listed. Each feed feature name can be ignored, mapped to an existing shop feature, or created as a feature of the name you choose (it is then connected to that feature). A name without a mapping follows the source setting below. Rows not in the feed yet can be added by hand. A deleted row (or one marked with the bulk button, which marks rows seen before but not in the newest scan of this list) comes back as not mapped on the next import or discovery if the feed still has the name. Several feed names, or several sources, may map to the same shop feature; for one product the first feed name in feed order wins and the conflict is logged. Values are matched to the existing values of the shop feature ignoring case and repeated or edge spaces before a new value is created. The optional value formula uses value and fields; a null or empty result skips the feature for that product, for example value == \'TBA\' ? null : value. Changes here are staged and saved together with the form when you press Save. Discover only records names and runs at once. Imports add the feed names they find; Discover scans the whole feed (ignoring the filter) using the saved features formula.'));
+      var howto = element('details', 'pi-howto'); howto.appendChild(element('summary', '', 'How this works'));
+      howto.appendChild(element('div', '', data.rows.length + ' listed. Each feed feature name can be ignored, mapped to an existing shop feature, or created as a feature of the name you choose (it is then connected to that feature). A name without a mapping follows the source setting below. Rows not in the feed yet can be added by hand. A deleted row (or one marked with the bulk button, which marks rows seen before but not in the newest scan of this list) comes back as not mapped on the next import or discovery if the feed still has the name. Several feed names, or several sources, may map to the same shop feature; for one product the first feed name in feed order wins and the conflict is logged. Values are matched to the existing values of the shop feature ignoring case and repeated or edge spaces before a new value is created. The optional value formula uses value and fields; a null or empty result skips the feature for that product, for example value == \'TBA\' ? null : value. Changes here are staged and saved together with the form when you press Save. Discover only records names and runs at once. Imports add the feed names they find; Discover scans the whole feed (ignoring the filter) using the saved features formula. The rule for values: a product-level value comes first, then each variant\'s distinct values in variant order. PrestaShop combinations carry attributes, not features, so per-variant values become several values of the product\'s feature. To show a per-size table on the product page, use table() in the description.'));
 
-      var setting = element('label', '', 'Feed names without a mapping ');
+      var settings = element('section', 'pi-settings'); var settingsHead = element('div', 'pi-settings-head'); settingsHead.appendChild(element('h4', '', 'Settings')); settingsHead.appendChild(howto); settings.appendChild(settingsHead);
+      var setting = element('div', 'pi-setting-row'); setting.appendChild(element('label', '', 'Feed names without a mapping'));
       var settingSelect = element('select', 'form-control');
       settingSelect.style.maxWidth = '420px';
       settingSelect.add(new Option('Ignore (not imported)', 'ignore'));
@@ -87,10 +89,10 @@
         showSetting(); PiStaging.changed();
       });
       setting.appendChild(settingSelect); setting.appendChild(settingIndicator);
-      pane.appendChild(setting);
+      settings.appendChild(setting); pane.appendChild(settings);
 
       var bar = element('div', 'form-inline'); bar.style.margin = '10px 0';
-      var discover = element('button', 'btn btn-default', 'Discover features from full feed');
+      var discover = element('button', 'btn btn-outline-secondary btn-sm', 'Discover features from full feed');
       discover.type = 'button';
       var discoverResult = live();
       discover.addEventListener('click', function () {
@@ -102,10 +104,10 @@
           .then(function () { discover.disabled = false; });
       });
       bar.appendChild(discover); bar.appendChild(document.createTextNode(' ')); bar.appendChild(discoverResult);
-      pane.appendChild(bar);
+
       if (notice) discoverResult.textContent = notice;
 
-      var add = element('div'); add.style.margin = '10px 0';
+      var add = element('div', 'pi-addform');
       var addText = element('input', 'form-control'); addText.type = 'text'; addText.maxLength = 128; addText.style.maxWidth = '320px'; addText.style.display = 'inline-block';
       addText.placeholder = 'Feed feature name, e.g. Wind range (kts)';
       addText.setAttribute('aria-label', 'Feed feature name to add');
@@ -113,7 +115,7 @@
       addSelect.setAttribute('aria-label', 'Action for the new row');
       var addCreate = element('input', 'form-control'); addCreate.type = 'text'; addCreate.maxLength = 128; addCreate.placeholder = 'Name of the feature to create'; addCreate.style.display = 'none'; addCreate.style.width = '240px'; addCreate.style.maxWidth = '240px';
       var addFormula = element('input', 'form-control'); addFormula.type = 'text'; addFormula.placeholder = 'optional value formula (value, fields)'; addFormula.style.display = 'inline-block'; addFormula.style.width = '280px';
-      var addButton = element('button', 'btn btn-default', 'Add row'); addButton.type = 'button';
+      var addButton = element('button', 'btn btn-outline-secondary btn-sm', 'Add row'); addButton.type = 'button';
       var addNote = live();
       addSelect.addEventListener('change', function () { addCreate.style.display = addSelect.value === 'create' ? 'inline-block' : 'none'; if (addSelect.value === 'create' && !addCreate.value) addCreate.value = addText.value.trim(); });
       addButton.addEventListener('click', function () {
@@ -127,15 +129,24 @@
       });
       addText.addEventListener('keydown', function (event) { if (event.key === 'Enter') { event.preventDefault(); addButton.click(); } });
       [addText, addSelect, addCreate, addFormula, addButton, addNote].forEach(function (control) { add.appendChild(control); add.appendChild(document.createTextNode(' ')); });
-      pane.appendChild(add);
+
       var staleBar = element('div'); staleBar.style.margin = '10px 0';
       staleBar.appendChild(PiStaging.staleButton(data, part, function () { load(); }));
-      pane.appendChild(staleBar);
+
 
       if (!data.rows.length && !part.add.length) {
+        pane.appendChild(bar); pane.appendChild(add); pane.appendChild(staleBar);
         pane.appendChild(element('p', '', 'No feature names yet. Map the features field on the Product fields tab, save, then discover them from the feed or run an import.'));
         return;
       }
+      var holder = element('div');
+      var shown = 150;
+      var ctl = PiStaging.listControls(data.rows.map(function (r) { r.label = r.key; return r; }), true, function () { shown = 150; draw(); });
+      ctl.actions.appendChild(bar); ctl.actions.appendChild(staleBar); ctl.addRow.appendChild(add);
+      pane.appendChild(ctl.el); pane.appendChild(holder);
+      function draw() {
+      holder.replaceChildren();
+      var vis = ctl.visible();
       var table = element('table', 'table pi-map-table pi-features-table');
       var header = table.createTHead().insertRow();
       ['Feed feature', 'Current (saved) status', 'Action, create name and value formula', ''].forEach(function (title) { header.appendChild(element('th', '', title)); });
@@ -160,11 +171,11 @@
         select.addEventListener('change', function () { toggle(); sync(); });
         createName.addEventListener('input', sync); expression.addEventListener('input', sync);
         controls.appendChild(select); controls.appendChild(createName); controls.appendChild(expression);
-        var remove = element('button', 'btn btn-default btn-sm', 'Remove'); remove.type = 'button';
+        var remove = element('button', 'btn btn-outline-danger btn-sm', 'Remove'); remove.type = 'button';
         remove.addEventListener('click', function () { part.add.splice(index, 1); PiStaging.changed(); load(); });
         cell(tr, '').appendChild(remove);
       });
-      data.rows.forEach(function (row) {
+      vis.slice(0, shown).forEach(function (row) {
         var tr = body.insertRow();
         var staged = part.rules[row.key];
         var eff = {action: row.action, id_feature: row.id_feature, create_name: row.create_name, value_expression: row.value_expression};
@@ -177,9 +188,12 @@
         var name = cell(tr, 'Feed feature');
         var title = element('div', 'pi-row-title', row.key); name.appendChild(title);
         name.appendChild(element('div', 'pi-row-meta ' + (row.seen ? 'text-success' : 'text-warning'), row.seen ? 'seen in feed ' + row.seen : 'not seen yet'));
-        if (row.count) name.appendChild(element('div', 'pi-row-meta', row.count + ' products'));
-        if (row.samples.length) { var samples = element('div', 'pi-row-meta pi-feature-samples', 'e.g. ' + row.samples.join(' | ')); samples.title = row.samples.join(' | '); name.appendChild(samples); }
-        cell(tr, 'Current (saved) status').textContent = row.status;
+        [['product formula', row.count, row.samples], ['variants formula', row.variant_count, row.variant_samples]].forEach(function (o) {
+          if (!o[1]) return;
+          var line = element('div', 'pi-row-meta pi-feature-samples', o[0] + ': ' + o[1] + ' products, e.g. ' + o[2].join(' | ')); line.title = line.textContent; name.appendChild(line);
+        });
+        var statusCell = cell(tr, 'Current (saved) status'); statusCell.appendChild(PiStaging.badge(row.badge, row.kind)); statusCell.title = row.status;
+        if (row.detail) statusCell.appendChild(element('div', 'pi-row-meta', row.detail));
         var controls = cell(tr, 'Action');
         var select = actionSelect(eff, data.options);
         select.setAttribute('aria-label', 'Action for ' + row.key);
@@ -198,7 +212,7 @@
         var flag = element('span');
         var undo = element('button', 'btn btn-link btn-sm', 'Undo'); undo.type = 'button'; undo.title = 'Back to the saved state';
         var line = element('div'); line.appendChild(flag); line.appendChild(undo); controls.appendChild(line);
-        var remove = element('button', 'btn btn-default btn-sm', 'Delete');
+        var remove = element('button', 'btn btn-outline-danger btn-sm', 'Delete');
         remove.type = 'button';
         function savedToken() { return row.action === 'map' && row.id_feature != null ? 'map:' + row.id_feature : (row.action === 'ignore' || row.action === 'create' ? row.action : 'none'); }
         function current() {
@@ -216,6 +230,7 @@
           flag.replaceChildren();
           if (deleting) flag.appendChild(unsaved('will be deleted')); else if (changed) flag.appendChild(unsaved());
           undo.style.display = changed && !deleting ? '' : 'none';
+          tr.classList.toggle('pi-row-dirty', changed || deleting);
           [select, createName, expression].forEach(function (control) { control.classList.toggle('pi-changed', changed && !deleting); control.disabled = deleting; });
           title.style.textDecoration = deleting ? 'line-through' : '';
           remove.textContent = deleting ? 'Undo delete' : 'Delete';
@@ -248,7 +263,11 @@
         cell(tr, '').appendChild(remove);
         show();
       });
-      pane.appendChild(table);
+      holder.appendChild(table);
+      ctl.count(vis.length, data.rows.length);
+      if (vis.length > shown) holder.appendChild(PiStaging.more(vis.length, shown, function () { shown += 150; draw(); }));
+      }
+      draw();
     }
 
     if (!id) pane.textContent = 'Save the source first.';

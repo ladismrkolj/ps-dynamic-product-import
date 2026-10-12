@@ -48,11 +48,13 @@ class FeatureMappingRepository
     public function recordDiscovery(int $idSource, array $found): void
     {
         $now = pSQL(date('Y-m-d H:i:s'));
+        $json = static fn (array $samples): string => pSQL(json_encode($samples, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), true);
         foreach ($found as $name => $info) {
             if (!\Db::getInstance()->execute(
-                'INSERT INTO `' . _DB_PREFIX_ . self::TABLE . '` (`id_source`, `source_name`, `product_count`, `sample_values`, `date_seen`, `date_upd`) VALUES ('
-                . (int) $idSource . ", '" . pSQL((string) $name, true) . "', " . (int) $info['count'] . ", '" . pSQL(json_encode($info['samples'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR), true)
-                . "', '" . $now . "', '" . $now . "') ON DUPLICATE KEY UPDATE `product_count` = VALUES(`product_count`), `sample_values` = VALUES(`sample_values`), `date_seen` = VALUES(`date_seen`)"
+                'INSERT INTO `' . _DB_PREFIX_ . self::TABLE . '` (`id_source`, `source_name`, `product_count`, `sample_values`, `variant_count`, `variant_samples`, `date_seen`, `date_upd`) VALUES ('
+                . (int) $idSource . ", '" . pSQL((string) $name, true) . "', " . (int) $info['count'] . ", '" . $json($info['samples']) . "', " . (int) $info['variant_count'] . ", '" . $json($info['variant_samples'])
+                . "', '" . $now . "', '" . $now . "') ON DUPLICATE KEY UPDATE `product_count` = VALUES(`product_count`), `sample_values` = VALUES(`sample_values`),"
+                . ' `variant_count` = VALUES(`variant_count`), `variant_samples` = VALUES(`variant_samples`), `date_seen` = VALUES(`date_seen`)'
             )) {
                 throw new \RuntimeException(DbError::message('Unable to record discovered features'));
             }

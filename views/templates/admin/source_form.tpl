@@ -13,14 +13,14 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     <li role="presentation"><a id="pi-features-link" href="#pi-features" role="tab" aria-controls="pi-features" aria-selected="false">Features</a></li>
   </ul>
   <div class="tab-content">
-    <div id="pi-general" class="tab-pane active" role="tabpanel" aria-labelledby="pi-general-link"></div>
+    <div id="pi-general" class="tab-pane active" role="tabpanel" aria-labelledby="pi-general-link"><div class="pi-pane-head"><span class="pi-muted">Basic settings of this source: where the feed is, how items are identified and what is imported.</span><details class="pi-howto"><summary>How this works</summary><div>The source location, format and identifier decide how the feed is read and how items are linked to products. The filter limits which items are imported. Product fields, Categories, Brands and Features are configured on their own tabs. Mapping-tab changes are saved with the Save button.</div></details></div></div>
     <div id="pi-products" class="tab-pane" role="tabpanel" aria-labelledby="pi-products-link">
 <div id="pi-grid-root" data-state="{$pi_state_json|escape:'html':'UTF-8'}" data-carriers="{$pi_carriers_json|escape:'html':'UTF-8'}">
   <div class="pi-grid-toolbar">
     <button type="button" id="pi-refresh-feed" class="btn btn-default">Refresh feed</button>
     <span id="pi-feed-status" role="status" aria-live="polite">Feed not loaded.</span>
   </div>
-  <p class="help-block">The feed loads automatically when a source is set and whenever the feed settings change. It uses a copy fetched in the last 15 minutes; Refresh feed fetches it again. For a saved source the load also records the categories and brands found. Imports always fetch the live feed.</p>
+  <div class="pi-pane-head"><span class="pi-muted">The feed loads automatically for a saved source and records its categories and brands.</span><details class="pi-howto"><summary>How this works</summary><div>The feed loads automatically when a source is set and whenever the feed settings change. It uses a copy fetched in the last 15 minutes; Refresh feed fetches it again. For a saved source the load also records the categories and brands found. Imports always fetch the live feed.</div></details></div>
   <details id="pi-formula-help">
     <summary id="pi-formula-help-toggle" class="btn btn-default"><i class="material-icons pi-ref-caret" aria-hidden="true">expand_more</i> <span id="pi-formula-help-label">Show formula syntax</span></summary>
     <table class="table table-condensed" aria-label="Formula syntax">
@@ -62,8 +62,8 @@ Exclude one brand: <code>fields['brand'] != 'Nike'</code>
     <p class="help-block">The text helpers return <code>null</code> for <code>null</code>, so a missing field leaves the PrestaShop field empty. <code>round</code> needs a number: wrap text in <code>num()</code>.</p>
   </details>
   <h3 id="pi-product-heading">PrestaShop product fields</h3>
-  <p class="help-block">Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images, related_products and carriers expect lists; features expects a name → value map, whose names the Features tab maps to shop features.</p>
-  <div id="pi-identifier-info" class="pi-identifier-info" role="group" aria-labelledby="pi-identifier-info-label" aria-disabled="true" style="opacity:.65;margin-bottom:12px;padding:8px 10px;background:#f5f5f5;border:1px solid #ddd;border-radius:3px">
+  <div class="pi-pane-head"><span class="pi-muted">Choose the feed field that fills each PrestaShop field, or write a formula.</span><details class="pi-howto"><summary>How this works</summary><div>Each row is a PrestaShop field. Choose the feed field that fills it, or choose Formula to combine several feed fields, for example <code>fields['brand'] ~ ' ' ~ fields['model']</code>. Feed fields are listed with the number of products that have them; where a product lacks a field, the PrestaShop field stays empty. A list feed field (such as <code>images[*]</code>) mapped to a single-value field uses its first entry. category_paths accepts a single category name or a breadcrumb list; images, related_products and carriers expect lists; features expects a name → value map, whose names the Features tab maps to shop features.</div></details></div>
+  <div id="pi-identifier-info" class="pi-identifier-info pi-setting-row" role="group" aria-labelledby="pi-identifier-info-label" aria-disabled="true">
     <strong id="pi-identifier-info-label">Identifier (matches products)</strong>
     <span class="help-block" style="display:inline;margin-left:8px">Internal link between this source's feed items and PrestaShop products. It is not written to the product (it shows only as the supplier reference when the source has a supplier). Use the reference field for a visible product code.</span>
     <div style="margin-top:4px"><span id="pi-identifier-info-value" aria-readonly="true" aria-labelledby="pi-identifier-info-label"><code>— not set —</code></span>

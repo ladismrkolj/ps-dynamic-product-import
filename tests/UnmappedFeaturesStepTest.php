@@ -35,7 +35,7 @@ class UnmappedFeaturesStepTest extends TestCase
         $columns = SchemaCheck::columnDefinitions();
         self::assertSame("VARCHAR(16) NOT NULL DEFAULT 'ignore'", $columns['pi_source']['unmapped_features']);
         self::assertSame(
-            ['id_mapping', 'id_source', 'source_name', 'action', 'id_feature', 'create_name', 'value_expression', 'product_count', 'sample_values', 'date_seen', 'date_upd'],
+            ['id_mapping', 'id_source', 'source_name', 'action', 'id_feature', 'create_name', 'value_expression', 'product_count', 'sample_values', 'variant_count', 'variant_samples', 'date_seen', 'date_upd'],
             array_keys($columns['pi_feature_mapping'])
         );
         self::assertStringContainsString('utf8mb4_bin', $columns['pi_feature_mapping']['source_name']);

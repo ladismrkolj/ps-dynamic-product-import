@@ -1,0 +1,137 @@
+/* Product Import admin: one small design system for every module screen (PrestaShop 9 tokens). */
+:root { --pi-gap: 24px; --pi-s1: 4px; --pi-s2: 8px; --pi-s3: 12px; --pi-s4: 16px; --pi-border: #dbe6e9; --pi-muted: #6c868e; --pi-accent: #f0ad4e; --pi-bg: #f8fafb; }
+/* Cards: stacked with a 24px gap, 24px padding, content never touches the edge. */
+.bootstrap .panel, .bootstrap .card { margin-bottom: var(--pi-gap); border: 1px solid var(--pi-border); border-radius: 6px; box-shadow: none; }
+.bootstrap .panel > .panel-heading, .bootstrap .panel > h3 { padding: var(--pi-s4) 24px; margin: 0; border-bottom: 1px solid var(--pi-border); background: var(--pi-bg); font-size: 16px; }
+.bootstrap form.defaultForm .panel > .panel-heading { margin: 0; }
+.bootstrap .panel > .panel-body, .bootstrap .panel > .form-wrapper, .bootstrap .panel > p, .bootstrap .panel > div:not(.panel-heading):not(.panel-footer) { padding-left: 24px; padding-right: 24px; }
+.bootstrap .panel > .form-wrapper { padding-top: 24px; padding-bottom: 24px; }
+div#pi-import-source, div#pi-run-list, div#pi-feed-dir, div#pi-deleted-products { padding-bottom: 24px; }
+.bootstrap .panel > h3 + * { margin-top: var(--pi-s4); }
+/* Text: muted help with a readable line length. */
+.bootstrap .help-block, .bootstrap .panel p.help-block { color: var(--pi-muted); font-size: 12.5px; font-style: normal; max-width: 80ch; margin-top: var(--pi-s1); }
+.pi-howto { margin: 0 0 var(--pi-s4); max-width: 90ch; }
+.pi-howto > summary { cursor: pointer; color: #25b9d7; font-weight: 600; }
+.pi-howto > div { margin-top: var(--pi-s2); color: var(--pi-muted); font-size: 12.5px; }
+/* Buttons: consistent size, one primary per card. */
+.bootstrap .btn { border-radius: 4px; }
+.bootstrap .btn-link { padding-left: var(--pi-s2); padding-right: var(--pi-s2); }
+/* Sticky action bar for the editor's Save. */
+.bootstrap form.defaultForm .panel-footer { position: sticky; bottom: 0; z-index: 20; background: #fff; border-top: 1px solid var(--pi-border); padding: var(--pi-s3) 24px; display: flex; gap: var(--pi-s3); align-items: center; justify-content: flex-end; box-shadow: 0 -4px 10px rgba(0,0,0,.05); }
+.pi-bar-count { margin-right: auto; color: var(--pi-muted); }
+.pi-bar-count.pi-has { color: #b5710d; font-weight: 600; }
+/* Tabs. */
+#pi-source-tabs > .nav-tabs { border-bottom: 1px solid var(--pi-border); margin-bottom: 0; }
+#pi-source-tabs > .nav-tabs > li > a { padding: var(--pi-s3) var(--pi-s4); border: 0; border-bottom: 3px solid transparent; text-decoration: none; color: #363a41; }
+#pi-source-tabs > .nav-tabs > li.active > a { border-bottom-color: #25b9d7; font-weight: 600; background: transparent; outline: 0; }
+#pi-source-tabs > .tab-content { padding-top: 24px; }
+/* Two-column form grid: 220px label + control, one column under 992px. */
+#pi-general .form-group { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--pi-s2) var(--pi-s4); align-items: start; margin: 0 0 var(--pi-s4); }
+#pi-general .form-group > label.control-label { max-width: none; text-align: left; padding: 8px 0 0; font-weight: 600; }
+#pi-general .form-group > div[class*="col-"] { max-width: 960px; }
+@media (max-width: 991px) { #pi-general .form-group { grid-template-columns: minmax(0, 1fr); } }
+/* Product fields: field name left, control right. */
+#pi-grid-root .pi-map { border-collapse: separate; border-spacing: 0; }
+#pi-grid-root .pi-map th { color: var(--pi-muted); font-weight: 600; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid var(--pi-border); }
+#pi-grid-root .pi-map td { padding: var(--pi-s3) var(--pi-s2); border-top: 1px solid #eef3f4; vertical-align: top; }
+#pi-grid-root .pi-map tr:hover td { background: var(--pi-bg); }
+#pi-variants { border: 1px solid var(--pi-border); border-radius: 6px; padding: 24px; margin: 24px 0; }
+#pi-variants > h3 { margin-top: 0; }
+#pi-configuration-panel { border: 1px solid var(--pi-border); border-radius: 6px; padding: 24px; margin-top: 24px; }
+#pi-configuration-panel .pi-preview-scroll table td:first-child, #pi-configuration-panel .pi-preview-scroll table th:first-child { position: sticky; left: 0; background: #fff; z-index: 1; }
+/* Mapping tables: one component for Categories, Brands, Features. */
+.pi-toolbar { display: flex; flex-wrap: wrap; gap: var(--pi-s2) var(--pi-s3); align-items: center; padding: var(--pi-s3); margin: 0 0 var(--pi-s4); background: var(--pi-bg); border: 1px solid var(--pi-border); border-radius: 6px; }
+.pi-toolbar .form-control { width: auto; display: inline-block; }
+.pi-toolbar .pi-grow { flex: 1 1 220px; min-width: 180px; }
+.pi-toolbar .pi-count { color: var(--pi-muted); margin-left: auto; }
+#pi-source-tabs table.pi-map-table { border-collapse: separate; border-spacing: 0; }
+#pi-source-tabs table.pi-map-table thead th { color: var(--pi-muted); font-size: 12px; text-transform: uppercase; border-bottom: 1px solid var(--pi-border); background: var(--pi-bg); }
+#pi-source-tabs table.pi-map-table tbody tr:nth-child(even) td { background: #fbfcfc; }
+#pi-source-tabs table.pi-map-table tbody tr:hover td { background: #f1f7f8; }
+#pi-source-tabs table.pi-map-table tbody tr.pi-row-dirty td:first-child { box-shadow: inset 3px 0 0 var(--pi-accent); }
+#pi-source-tabs table.pi-map-table td { border-top: 1px solid #eef3f4; }
+.pi-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; line-height: 1.5; background: #eceeef; color: #363a41; }
+.pi-badge.pi-ok { background: #e1f4e4; color: #1e6b2c; }
+.pi-badge.pi-warn { background: #fdf0d5; color: #8a5a00; }
+.pi-badge.pi-off { background: #eceeef; color: #6c868e; }
+.pi-actions { display: flex; gap: var(--pi-s1); justify-content: flex-end; flex-wrap: wrap; }
+.pi-more { margin: var(--pi-s4) 0; text-align: center; }
+/* List page and runs. */
+.bootstrap #pi-import-source textarea, .bootstrap #pi-feed-dir input[type=text] { max-width: 100%; }
+/* Extra buttons and badges. */
+.bootstrap .btn-outline-danger { color: #c05c67; border: 1px solid #c05c67; background: #fff; }
+.bootstrap .btn-outline-danger:hover { background: #c05c67; color: #fff; }
+.bootstrap .btn-outline-secondary { color: #363a41; border: 1px solid #bbcdd2; background: #fff; }
+.bootstrap .btn-primary { background: #25b9d7; border-color: #25b9d7; color: #fff; }
+.pi-badge.pi-bad { background: #f9dcdf; color: #a32232; }
+.pi-badge.pi-run { background: #d9eef7; color: #0b6a8a; }
+.pi-badge { white-space: nowrap; }
+.pi-muted { color: var(--pi-muted); }
+/* Settings section on the mapping tabs: the same 2-column grid as the General tab. */
+.pi-settings { border: 1px solid var(--pi-border); border-radius: 6px; padding: 16px 24px; margin: 0 0 var(--pi-s4); }
+.pi-settings > h4 { margin: 0 0 var(--pi-s3); font-size: 14px; }
+.pi-setting-row, #pi-category-root .form-group { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--pi-s2) var(--pi-s4); align-items: start; margin: 0 0 var(--pi-s3); }
+.pi-setting-row > label, #pi-category-root .form-group > label.control-label { font-weight: 600; padding: 8px 0 0; text-align: left; max-width: none; }
+.pi-setting-row select { max-width: 460px; }
+#pi-category-root .form-group > div[class*="col-"] { float: none; width: auto; max-width: 720px; margin: 0; padding: 0; }
+#pi-category-root .tree-panel-heading-controls, #pi-category-root .tree-panel-label-title { margin-bottom: var(--pi-s2); }
+#pi-category-root .tree-folder-name, #pi-category-root .tree-item-name { padding: 2px 0; }
+#pi-category-root .panel { margin-bottom: var(--pi-s2); max-height: 280px; overflow: auto; }
+#pi-category-root > .form-group + * { margin-top: 0; }
+@media (max-width: 991px) { .pi-setting-row, #pi-category-root .form-group { grid-template-columns: minmax(0, 1fr); } }
+/* Runs page: one line per cell, narrow right-aligned numbers, the log wraps. */
+table.pi_import_run { width: 100%; }
+table.pi_import_run { font-size: 12px; }
+table.pi_import_run .pi-badge { padding: 1px 6px; font-size: 11px; }
+table.pi_import_run th { font-size: 11px; }
+table.pi_import_run td, table.pi_import_run th { padding: 8px 3px; vertical-align: top; white-space: normal; }
+table.pi_import_run td:nth-child(2), table.pi_import_run td:nth-child(3), table.pi_import_run td:nth-child(4) { white-space: nowrap; }
+table.pi_import_run td:nth-child(n+6):nth-child(-n+11), table.pi_import_run th:nth-child(n+6):nth-child(-n+11) { width: 1%; text-align: right; }
+table.pi_import_run td:last-child, table.pi_import_run th:last-child { width: auto; min-width: 100px; }
+table.pi_import_run td:nth-child(1) { min-width: 110px; }
+table.pi_import_run th span.title_box { white-space: normal; }
+table.pi_import_run .pi-log summary { cursor: pointer; list-style: none; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+table.pi_import_run .pi-log pre { white-space: pre-wrap; max-width: 90ch; overflow-wrap: anywhere; margin: 8px 0 0; font-size: 12px; background: var(--pi-bg); border: 1px solid var(--pi-border); padding: 8px; }
+.bootstrap .panel.col-lg-12 { float: none; width: 100%; box-sizing: border-box; }
+#pi-general .form-group::before, #pi-general .form-group::after, #pi-category-root .form-group::before, #pi-category-root .form-group::after, .pi-setting-row::before, .pi-setting-row::after { display: none; content: none; }
+#pi-category-root .tree-panel-heading-controls { display: flex; flex-wrap: wrap; gap: var(--pi-s2); align-items: center; }
+#pi-category-root .tree-panel-heading-controls .tree-actions { float: none !important; display: flex; gap: var(--pi-s2); align-items: center; margin-left: auto; }
+#pi-category-root .tree-actions .pull-right { float: none !important; order: 3; }
+#pi-category-root .tree-actions .btn { padding: 4px 10px; }
+/* Final polish: toolbar rows, How-this-works placement, no italics, tight header. */
+.bootstrap .help-block, .bootstrap p.help-block, .bootstrap .pi-howto, .bootstrap .pi-howto * , .bootstrap .pi-muted { font-style: normal !important; }
+.pi-toolbar { display: block; padding: var(--pi-s3); }
+.pi-tb-row, .pi-tb-add { display: flex; flex-wrap: wrap; gap: var(--pi-s2) var(--pi-s3); align-items: center; }
+.pi-tb-add { margin-top: var(--pi-s3); padding-top: var(--pi-s3); border-top: 1px solid var(--pi-border); }
+.pi-tb-label { font-weight: 600; white-space: nowrap; }
+.pi-tb-actions { display: flex; gap: var(--pi-s2); margin-left: auto; flex-wrap: wrap; align-items: center; }
+.pi-toolbar .pi-count { margin-left: 0; white-space: nowrap; }
+.pi-addform { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--pi-s2); align-items: center; min-width: 0; }
+.pi-addform .form-control { width: auto; flex: 1 1 160px; min-width: 0; max-width: 340px; display: inline-block !important; }
+.pi-addform select.form-control { flex: 1 1 200px; }
+.pi-addform button { flex: 0 0 auto; }
+@media (max-width: 991px) { .pi-tb-actions { margin-left: 0; width: 100%; } .pi-addform .form-control { max-width: none; flex-basis: 100%; } .pi-tb-label { width: 100%; } }
+.pi-settings-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--pi-s2); margin-bottom: var(--pi-s3); }
+.pi-settings-head > h4 { margin: 0; }
+.pi-settings-head > .pi-howto { margin: 0; text-align: right; }
+.pi-settings-head > .pi-howto[open] { flex-basis: 100%; text-align: left; }
+.pi-pane-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--pi-s2); margin: 0 0 var(--pi-s3); }
+.pi-pane-head > .pi-howto { margin: 0; }
+.pi-pane-head > .pi-howto[open] { flex-basis: 100%; }
+#pi-identifier-info { opacity: 1; background: transparent; border: 0; padding: 0; margin: 0 0 var(--pi-s4); }
+#pi-identifier-info > * { margin: 0; }
+.bootstrap form.defaultForm .form-wrapper { padding-top: 8px; }
+.bootstrap form.defaultForm .panel-heading { padding-bottom: 12px; }
+.pi-wide-group { margin-bottom: 0 !important; }
+#pi-source-tabs { margin-top: 0; }
+.pi-pane-head, .pi-pane-head span, .pi-howto, .pi-howto summary { font-family: inherit; }
+#pi-identifier-info.pi-setting-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--pi-s2) var(--pi-s4); }
+#pi-identifier-info .help-block { flex: 1 1 320px; margin: 0; }
+.bootstrap #pi-source-tabs code { white-space: normal; overflow-wrap: anywhere; }
+#pi-general textarea.form-control { height: 140px !important; min-height: 100px; }
+#pi-general textarea.textarea-autosize { max-height: 180px !important; overflow: auto !important; }
+/* Same 24px inner padding on every tab pane; label column 220px without wrapping. */
+.bootstrap .pi-wide-tabs { padding-left: 24px !important; padding-right: 24px !important; }
+#pi-general .form-group > label.control-label { width: 100% !important; max-width: none !important; float: none; white-space: normal; padding-right: 0; }
+#pi-general .form-group > div[class*="col-"] { width: 100% !important; max-width: 760px !important; float: none; margin-left: 0; padding-left: 0; padding-right: 0; }
+#pi-grid-root .pi-formula-box button { white-space: nowrap; }

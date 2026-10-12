@@ -1,6 +1,7 @@
 <div id="pi-import-source" class="panel" data-url="{$pi_import_url|escape:'html':'UTF-8'}">
   <h3>Import source configuration</h3>
-  <p class="help-block">Upload a <code>.productimport.yaml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, features (in the source language), suppliers and the language are matched by name; unmatched names are listed below. Mappings are written as <code>feed value: PrestaShop value</code>; you can also list feed categories or brands the feed has not shown yet, and they are mapped as soon as they appear.</p>
+  <p class="help-block">Upload a <code>.productimport.yaml</code> file exported with <strong>Export</strong>, or paste its content.</p>
+  <details class="pi-howto"><summary>How this works</summary><div>Upload a <code>.productimport.yaml</code> file exported with <strong>Export</strong>. Edit the YAML in any text editor, for example to change category or brand mappings, and upload it again. Categories, brands, features (in the source language), suppliers and the language are matched by name; unmatched names are listed below. Mappings are written as <code>feed value: PrestaShop value</code>; you can also list feed categories or brands the feed has not shown yet, and they are mapped as soon as they appear.</div></details>
   <div class="form-group">
     <label>What to do with the file</label>
     {if $pi_import_can_create}
@@ -26,7 +27,7 @@
     <label for="pi-import-text">&hellip; or paste the exported YAML</label>
     <textarea id="pi-import-text" rows="3" class="form-control"></textarea>
   </div>
-  <button type="button" id="pi-import-button" class="btn btn-default">Import</button>
+  <button type="button" id="pi-import-button" class="btn btn-primary">Import</button>
   <div id="pi-import-result" aria-live="polite" style="margin-top:10px"></div>
 </div>
 {literal}

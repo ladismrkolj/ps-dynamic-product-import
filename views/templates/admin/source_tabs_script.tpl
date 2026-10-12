@@ -12,11 +12,6 @@
 #pi-source-tabs .pi-changed { border-color: #f0ad4e !important; background-color: #fff8e1 !important; }
 #pi-category-root .form-group { margin-left: 0; margin-right: 0; }
 #pi-category-root .form-group > div[class*="col-"] { float: none; width: 100%; margin-left: 0; }
-/* General: compact labels, controls as wide as their content needs. */
-#pi-general .form-group { display: flex; align-items: flex-start; margin-left: 0; margin-right: 0; }
-#pi-general .form-group::before, #pi-general .form-group::after { display: none; }
-#pi-general .form-group > label.control-label { flex: 0 0 190px; width: auto; max-width: 190px; float: none; text-align: right; padding-right: 14px; }
-#pi-general .form-group > div[class*="col-"] { flex: 1 1 auto; width: auto; max-width: 1200px; float: none; min-width: 0; }
 #pi-general textarea.form-control { height: 140px; min-height: 100px; resize: vertical; }
 #pi-general .form-group select.form-control { max-width: 360px; }
 #pi-general .form-group .fixed-width-sm, #pi-general .input-group.fixed-width-sm { max-width: 140px; }

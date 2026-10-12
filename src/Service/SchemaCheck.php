@@ -75,6 +75,8 @@ class SchemaCheck
                 'value_expression' => 'TEXT NULL',
                 'product_count' => 'INT UNSIGNED NOT NULL DEFAULT 0',
                 'sample_values' => 'TEXT NULL',
+                'variant_count' => 'INT UNSIGNED NOT NULL DEFAULT 0',
+                'variant_samples' => 'TEXT NULL',
                 'date_seen' => 'DATETIME NULL',
                 'date_upd' => 'DATETIME NOT NULL',
             ],

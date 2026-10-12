@@ -226,8 +226,8 @@ class PreviewBuilder
                     return [self::display($value), $error->getMessage(), null];
                 }
                 $grouped = [];
-                foreach ($mapped['pairs'] as [$label, $one]) {
-                    $grouped[$label][] = $one;
+                foreach ($mapped['pairs'] as [$label, $one, $from]) {
+                    $grouped[$label][] = $from === '' ? $one : $one . ' [' . $from . ']';
                 }
                 $text = mb_substr(implode('; ', array_map(static fn (string $label): string => $label . ': ' . implode(', ', $grouped[$label]), array_keys($grouped))), 0, self::DISPLAY_LIMIT);
                 $notes = [];

@@ -71,6 +71,17 @@ class FeatureMapper
             $sources[] = $normalized['pairs'];
         }
         $pairs = FeatureValues::combine($sources);
+        // Where each value came from (P = product formula, V = a variant), for the preview.
+        $origin = [];
+        if ($variantFeatures !== []) {
+            foreach ($sources as $at => $map) {
+                foreach ($map as $name => $value) {
+                    $mark = $features !== null && $at === 0 ? 'P' : 'V';
+                    $key = FeatureValueMatcher::normalize((string) $value);
+                    $origin[(string) $name][$key] = str_contains($origin[(string) $name][$key] ?? '', $mark) ? $origin[(string) $name][$key] : ($origin[(string) $name][$key] ?? '') . $mark;
+                }
+            }
+        }
         $rules = $this->rules($idSource);
         foreach (array_keys($pairs) as $name) {
             $name = (string) $name;
@@ -116,7 +127,7 @@ class FeatureMapper
                 }
                 $taken[$key] = $entry['name'];
                 foreach ($entry['values'] as $value) {
-                    $result['pairs'][] = [$target !== null ? $this->featureName($target, $idLang) : (string) $entry['create'], $value];
+                    $result['pairs'][] = [$target !== null ? $this->featureName($target, $idLang) : (string) $entry['create'], $value, $origin[$entry['name']][FeatureValueMatcher::normalize($value)] ?? ''];
                 }
                 continue;
             }
@@ -168,26 +179,30 @@ class FeatureMapper
                 if (!is_array($item)) {
                     throw new \InvalidArgumentException('Item is not an object.');
                 }
-                $sources = [];
+                $productPairs = [];
                 $value = $expression === null ? null : $this->evaluator->evaluate($expression, ['fields' => $item]);
                 if ($value !== null) {
-                    $sources[] = NativeFields::features($value)['pairs'];
+                    $productPairs = NativeFields::features($value)['pairs'];
                 }
+                $variantSources = [];
                 if ($variantsExpression !== null && $variantFeaturesExpression !== null) {
                     $variants = $this->evaluator->evaluate($variantsExpression, ['fields' => $item]);
                     foreach (is_array($variants) ? $variants : [] as $variant) {
                         $raw = is_array($variant) ? $this->evaluator->evaluate($variantFeaturesExpression, ['fields' => $item, 'variant' => $variant]) : null;
                         if ($raw !== null) {
-                            $sources[] = NativeFields::features($raw)['pairs'];
+                            $variantSources[] = NativeFields::features($raw)['pairs'];
                         }
                     }
                 }
-                foreach (FeatureValues::combine($sources) as $name => $texts) {
-                    $found[$name] ??= ['count' => 0, 'samples' => []];
-                    ++$found[$name]['count'];
-                    foreach ($texts as $text) {
-                        if (count($found[$name]['samples']) < self::SAMPLE_LIMIT && !in_array($text, $found[$name]['samples'], true)) {
-                            $found[$name]['samples'][] = $text;
+                foreach (['' => array_map(static fn (string $text): array => [$text], $productPairs), 'variant_' => FeatureValues::combine($variantSources)] as $origin => $byName) {
+                    foreach ($byName as $name => $texts) {
+                        $name = (string) $name;
+                        $found[$name] ??= ['count' => 0, 'samples' => [], 'variant_count' => 0, 'variant_samples' => []];
+                        ++$found[$name][$origin . 'count'];
+                        foreach ($texts as $text) {
+                            if (count($found[$name][$origin . 'samples']) < self::SAMPLE_LIMIT && !in_array($text, $found[$name][$origin . 'samples'], true)) {
+                                $found[$name][$origin . 'samples'][] = $text;
+                            }
                         }
                     }
                 }

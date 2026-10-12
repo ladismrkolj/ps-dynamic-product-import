@@ -39,11 +39,47 @@
         return part;
       },
       changed: refresh,
+      badge: function (text, kind) { var node = document.createElement('span'); node.className = 'pi-badge pi-' + (kind || 'off'); node.textContent = text; node.title = text; return node; },
+      // Search box, filter select and count for a mapping table; rows carry label/key, status, mapped, action, seen, stale.
+      listControls: function (rows, features, redraw) {
+        var el = document.createElement('div'); el.className = 'pi-toolbar';
+        var row1 = document.createElement('div'); row1.className = 'pi-tb-row'; var row2 = document.createElement('div'); row2.className = 'pi-tb-add';
+        var rowLabel = document.createElement('span'); rowLabel.className = 'pi-tb-label'; rowLabel.textContent = 'Add a feed value'; row2.appendChild(rowLabel);
+        el.appendChild(row1); el.appendChild(row2);
+        var actions = document.createElement('div'); actions.className = 'pi-tb-actions';
+        var search = document.createElement('input'); search.type = 'search'; search.className = 'form-control pi-grow'; search.placeholder = 'Search'; search.setAttribute('aria-label', 'Search the list');
+        var filter = document.createElement('select'); filter.className = 'form-control'; filter.setAttribute('aria-label', 'Filter the list');
+        [['all', 'All'], ['mapped', 'Mapped'], ['notmapped', 'Not mapped']].concat(features ? [['ignored', 'Ignored']] : []).concat([['notinfeed', 'Not in feed']]).forEach(function (o) { filter.add(new Option(o[1], o[0])); });
+        var count = document.createElement('span'); count.className = 'pi-count'; count.setAttribute('aria-live', 'polite');
+        var timer = null;
+        search.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(redraw, 150); });
+        filter.addEventListener('change', redraw);
+        row1.appendChild(search); row1.appendChild(filter); row1.appendChild(count); row1.appendChild(actions);
+        function ok(row) {
+          var f = filter.value;
+          if (f === 'mapped' && !row.mapped) return false;
+          if (f === 'notmapped' && row.mapped) return false;
+          if (f === 'ignored' && row.action !== 'ignore') return false;
+          if (f === 'notinfeed' && row.seen && !row.stale) return false;
+          var q = search.value.trim().toLowerCase();
+          return !q || ((row.label || row.key || '') + ' ' + (row.status || '')).toLowerCase().indexOf(q) !== -1;
+        }
+        return {
+          el: el, actions: actions, addRow: row2,
+          visible: function () { return rows.filter(ok); },
+          count: function (shown, total) { count.textContent = shown + ' of ' + total + ' shown'; }
+        };
+      },
+      more: function (total, shown, onMore) {
+        var box = document.createElement('div'); box.className = 'pi-more';
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-outline-secondary btn-default'; b.textContent = 'Show more (' + (total - shown) + ' left)';
+        b.addEventListener('click', onMore); box.appendChild(b); return box;
+      },
       // Button that stages the deletion of every stale row (seen before, but not in the latest scan); nothing is written until Save.
       staleButton: function (data, part, reload) {
         var box = document.createElement('span');
-        var button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-default';
-        button.textContent = 'Mark rows not seen in the last scan for deletion';
+        var button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-outline-secondary btn-sm';
+        button.textContent = 'Mark stale…'; button.title = 'Mark rows not seen in the last scan for deletion';
         var note = document.createElement('span'); note.setAttribute('aria-live', 'polite'); note.style.marginLeft = '8px';
         button.addEventListener('click', function () {
           var rows = data.rows.filter(function (row) { return row.stale && part.del.indexOf(row.key) === -1; });
@@ -65,6 +101,19 @@
       event.preventDefault();
       event.returnValue = '';
     });
+    var footer = form.querySelector('.panel-footer');
+    var counter = document.createElement('span'); counter.className = 'pi-bar-count';
+    if (footer) { footer.insertBefore(counter, footer.firstChild); var cancel = document.createElement('a'); cancel.href = location.href; cancel.className = 'btn btn-outline-secondary btn-default'; cancel.textContent = 'Cancel'; cancel.addEventListener('click', function (e) { e.preventDefault(); submitting = true; location.reload(); }); footer.insertBefore(cancel, footer.querySelector('button[type=submit]')); }
+    function tally() {
+      var n = 0;
+      ['category', 'brand', 'feature'].forEach(function (t) {
+        var p = data[t]; if (!p) return;
+        n += Object.keys(p.rows || p.rules || {}).length + (p.add || []).length + (p.del || []).length + (Object.prototype.hasOwnProperty.call(p, 'default') || Object.prototype.hasOwnProperty.call(p, 'setting') ? 1 : 0);
+      });
+      counter.textContent = n ? n + ' unsaved change' + (n === 1 ? '' : 's') + ' in the mapping tabs' : 'No unsaved mapping changes';
+      counter.classList.toggle('pi-has', n > 0);
+    }
+    listeners.push(tally);
     refresh();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

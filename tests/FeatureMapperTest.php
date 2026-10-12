@@ -38,7 +38,7 @@ class FeatureMapperTest extends TestCase
         $mappings->rows['Weight (kg)'] = FakeFeatureMappings::row('Weight (kg)', 'map', 6);
         $resolver = new FakeFeatureResolver();
         $result = $this->mapper($mappings, $resolver)->resolve(['Weight (kg)' => '12', 'Finbox' => 'US'], [], 1, 'create', 1, false);
-        self::assertSame([['Weight', '12'], ['Finbox', 'US']], $result['pairs']);
+        self::assertSame([['Weight', '12', ''], ['Finbox', 'US', '']], $result['pairs']);
         self::assertSame([], $result['rows']);
         self::assertSame([], $mappings->writes);
         self::assertSame([], $resolver->calls);
@@ -49,7 +49,7 @@ class FeatureMapperTest extends TestCase
         $mappings = new FakeFeatureMappings();
         $mappings->rows['Size'] = FakeFeatureMappings::row('Size', 'create', null, 'Size', "value ~ ' ' ~ fields['unit']");
         $result = $this->mapper($mappings)->resolve(['Size' => '12'], ['unit' => 'm2'], 1, 'ignore', 1, false);
-        self::assertSame([['Size', '12 m2']], $result['pairs']);
+        self::assertSame([['Size', '12 m2', '']], $result['pairs']);
     }
 
     public function testRejectsAFeaturesValueThatIsNotAMapOrList(): void
@@ -72,7 +72,7 @@ class FeatureMapperTest extends TestCase
         self::assertSame(['unique_features' => 2, 'items_scanned' => 11, 'failed_items' => 1, 'errors' => ['Item 10: Item is not an object.'], 'errors_omitted' => 0], $result);
         self::assertSame(8, $mappings->discovered['Finbox']['count']);
         self::assertSame(['V1', 'V2', 'V3', 'V4', 'V5'], $mappings->discovered['Finbox']['samples']);
-        self::assertSame(['count' => 9, 'samples' => ['Red']], $mappings->discovered['Colour']);
+        self::assertSame(['count' => 9, 'samples' => ['Red'], 'variant_count' => 0, 'variant_samples' => []], $mappings->discovered['Colour']);
         self::assertArrayNotHasKey('Weight', $mappings->discovered);
         self::assertSame(NativeFields::FEATURE_NAME_LIMIT, 128);
     }
@@ -97,7 +97,7 @@ class FeatureMapperTest extends TestCase
         $mappings = new FakeFeatureMappings();
         $mappings->rows['Area'] = FakeFeatureMappings::row('Area', 'map', 6);
         $result = $this->mapper($mappings)->resolve(null, [], 1, 'ignore', 1, false, [0 => ['Area' => '7'], 1 => ['Area' => '9']]);
-        self::assertSame([['Weight', '7'], ['Weight', '9']], $result['pairs']);
+        self::assertSame([['Weight', '7', 'V'], ['Weight', '9', 'V']], $result['pairs']);
         self::assertSame([], $mappings->writes);
     }
 
@@ -111,7 +111,7 @@ class FeatureMapperTest extends TestCase
         ];
         $result = $this->mapper($mappings)->discover($items, 1, "fields['specs']", "fields['variants']", "{'Area': variant['size']}");
         self::assertSame(0, $result['failed_items']);
-        self::assertSame(['count' => 2, 'samples' => ['7', '9', '12']], $mappings->discovered['Area']);
+        self::assertSame(['count' => 0, 'samples' => [], 'variant_count' => 2, 'variant_samples' => ['7', '9', '12']], $mappings->discovered['Area']);
         self::assertSame(1, $mappings->discovered['Colour']['count']);
         $variantsOnly = $this->mapper(new FakeFeatureMappings())->discover($items, 1, null, "fields['variants']", "{'Area': variant['size']}");
         self::assertSame(2, $variantsOnly['unique_features'] + 1);
