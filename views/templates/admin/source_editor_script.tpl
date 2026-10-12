@@ -11,8 +11,19 @@
 #pi-grid-root .pi-partial td:first-child { background: #fff8e1; }
 #pi-grid-root .pi-samples { color: #555; word-break: break-word; }
 #pi-grid-root .pi-map { width: 100%; table-layout: fixed; }
-#pi-grid-root .pi-map th:first-child, #pi-grid-root .pi-map td:first-child { width: 34%; }
-#pi-grid-root .pi-map td:nth-child(2) select, #pi-grid-root .pi-map td:nth-child(2) input[type=text] { width: 100%; min-width: 320px; }
+#pi-grid-root .pi-map th:first-child, #pi-grid-root .pi-map td:first-child { width: 22%; min-width: 200px; }
+#pi-grid-root .pi-map td:nth-child(2) > select, #pi-grid-root .pi-map td:nth-child(2) > input[type=text] { width: 100%; min-width: 0; }
+#pi-grid-root .pi-formula-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+#pi-grid-root .pi-formula-box > textarea { flex: 1 1 100%; min-height: 64px; }
+#pi-grid-root .pi-formula-box > span { display: flex; align-items: center; gap: 6px; flex: 1 1 360px; min-width: 0; }
+#pi-grid-root .pi-formula-box > span > select { flex: 1 1 200px; width: auto; min-width: 0; }
+#pi-grid-root .pi-formula-box > div { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+#pi-grid-root .pi-formula-box > div label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: normal; }
+#pi-grid-root .pi-formula-box > div label input { width: 72px; }
+#pi-grid-root .pi-formula-box .pi-sample-results { flex-basis: 100%; }
+#pi-grid-root .pi-pattern-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+#pi-grid-root .pi-pattern-box > input { flex: 1 1 160px; width: auto; }
+#pi-grid-root .pi-pattern-box > select { flex: 2 1 240px; width: auto; min-width: 0; }
 #pi-grid-root .pi-map select { max-width: 100%; }
 #pi-grid-root .pi-map textarea { width: 100%; }
 #pi-grid-root .pi-map .pi-target-help { display: block; color: #666; margin-top: 2px; }
@@ -42,7 +53,7 @@
     ['regular_price', '', 'Original price; when higher than price, price is applied as a discount.'],
     ['wholesale_price', '', 'Purchase price.'],
     ['short_description', '', 'Short description (HTML allowed).'],
-    ['description', '', 'Long description (HTML allowed).'],
+    ['description', '', 'Long description (HTML allowed).', {hint: "To append a specification table: fields['description'] ~ table(fields['specification_table'])"}],
     ['ean13', '', 'EAN-13 barcode: exactly 13 digits with a valid check digit; invalid values are not written.'],
     ['mpn', '', 'Manufacturer part number; with the brand it identifies the same product across suppliers'],
     ['weight', '', 'Weight.'],

@@ -47,7 +47,7 @@
     function render(type, state, data, notice) {
       var part = PiStaging.part(type);
       var help = document.createElement('p');
-      help.textContent = data.rows.length + ' listed. A value without a mapping is resolved by the next import (the source default if one is set, otherwise an existing ' + (type === 'category' ? 'category with the same name path, or a new one' : 'brand with the same name, or a new one') + ') and the result is stored here as its mapping. Choose the empty option to clear a mapping so the next import resolves it again. Changes here are staged and saved together with the form when you press Save. The feed is read automatically when the source settings change; rows appear here once the feed contains them.';
+      help.textContent = data.rows.length + ' listed. A value without a mapping is resolved by the next import (the source default if one is set, otherwise an existing ' + (type === 'category' ? 'category with the same name path, or a new one' : 'brand with the same name, or a new one') + ') and the result is stored here as its mapping. Choose the empty option to clear a mapping so the next import resolves it again. Changes here are staged and saved together with the form when you press Save. The feed is read automatically when the source settings change; rows appear here once the feed contains them. A deleted row (or one marked with the bulk button, which marks rows seen before but not in the newest scan of this list) comes back as not mapped on the next import or discovery if the feed still has the value.';
       state.pane.appendChild(help);
       var label = document.createElement('label'); label.textContent = 'Default for anything not mapped below';
       state.pane.appendChild(label);
@@ -80,6 +80,9 @@
       });
       [addText, addSelect, addButton, addIndicator].forEach(function (element) { add.appendChild(element); add.appendChild(document.createTextNode(' ')); });
       state.pane.appendChild(add);
+      var staleBar = document.createElement('div'); staleBar.style.margin = '10px 0';
+      staleBar.appendChild(PiStaging.staleButton(data, part, function () { load(type); }));
+      state.pane.appendChild(staleBar);
       if (notice) { addIndicator.textContent = notice; }
 
       if (!data.rows.length && !part.add.length) {
@@ -87,41 +90,46 @@
         empty.textContent = 'No rows yet. Add one above, or load the feed (set the ' + (type === 'category' ? 'category_paths' : 'manufacturer') + ' mapping on the Product fields tab and save).';
         state.pane.appendChild(empty); return;
       }
-      var table = document.createElement('table'); table.className = 'table';
+      var table = document.createElement('table'); table.className = 'table pi-map-table';
       var header = table.createTHead().insertRow();
-      ['Feed value', 'In feed', 'Current status', 'Destination', ''].forEach(function (title) { var cell = document.createElement('th'); cell.textContent = title; header.appendChild(cell); });
+      ['Feed value', 'Current (saved) status', 'Destination', ''].forEach(function (title) { var cell = document.createElement('th'); cell.textContent = title; header.appendChild(cell); });
       var body = table.createTBody();
+      function cell(tr, label, className) { var td = tr.insertCell(); td.setAttribute('data-label', label); if (className) td.className = className; return td; }
       part.add.forEach(function (row, index) {
-        var tr = body.insertRow(); tr.insertCell().textContent = row.label;
-        tr.insertCell().appendChild(badge('new, unsaved'));
-        tr.insertCell().textContent = 'will be added when you press Save';
+        var tr = body.insertRow();
+        var first = cell(tr, 'Feed value'); first.textContent = row.label; first.appendChild(badge('new, unsaved'));
+        cell(tr, 'Current (saved) status').textContent = 'not saved yet';
         var control = select(data.options, row.value, NOT_MAPPED);
         control.setAttribute('aria-label', 'Destination for ' + row.label);
+        control.classList.add('pi-changed');
         control.addEventListener('change', function () { row.value = control.value; PiStaging.changed(); });
-        tr.insertCell().appendChild(control);
+        cell(tr, 'Destination').appendChild(control);
         var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm'; remove.textContent = 'Remove';
         remove.addEventListener('click', function () { part.add.splice(index, 1); PiStaging.changed(); load(type); });
-        tr.insertCell().appendChild(remove);
+        cell(tr, '').appendChild(remove);
       });
       data.rows.forEach(function (row) {
-        var tr = body.insertRow(); var name = tr.insertCell(); name.textContent = row.label;
-        var badgeCell = tr.insertCell();
-        var seen = document.createElement('span');
-        seen.className = 'label ' + (row.seen ? 'label-success' : 'label-warning');
+        var tr = body.insertRow();
+        var name = cell(tr, 'Feed value'); var title = document.createElement('div'); title.className = 'pi-row-title'; title.textContent = row.label; name.appendChild(title);
+        var seen = document.createElement('div'); seen.className = 'pi-row-meta ' + (row.seen ? 'text-success' : 'text-warning');
         seen.textContent = row.seen ? 'seen in feed ' + row.seen : 'not seen yet';
-        badgeCell.appendChild(seen);
-        var status = tr.insertCell(); status.textContent = row.status;
+        name.appendChild(seen);
+        var status = cell(tr, 'Current (saved) status'); status.textContent = row.status;
         var control = select(data.options, Object.prototype.hasOwnProperty.call(part.rows, row.key) ? part.rows[row.key] : row.id, NOT_MAPPED);
         control.setAttribute('aria-label', 'Destination for ' + row.label);
         var originalId = row.id == null ? '' : String(row.id);
         var flag = document.createElement('span');
+        var undo = document.createElement('button'); undo.type = 'button'; undo.className = 'btn btn-link btn-sm'; undo.textContent = 'Undo';
+        undo.title = 'Back to the saved destination';
         var remove = document.createElement('button'); remove.type = 'button'; remove.className = 'btn btn-default btn-sm';
         function show() {
           var deleting = part.del.indexOf(row.key) !== -1;
           var changed = Object.prototype.hasOwnProperty.call(part.rows, row.key);
           flag.replaceChildren();
           if (deleting) flag.appendChild(badge('will be deleted')); else if (changed) flag.appendChild(badge('unsaved'));
-          name.style.textDecoration = deleting ? 'line-through' : '';
+          undo.style.display = changed && !deleting ? '' : 'none';
+          control.classList.toggle('pi-changed', changed && !deleting);
+          title.style.textDecoration = deleting ? 'line-through' : '';
           control.disabled = deleting;
           remove.textContent = deleting ? 'Undo delete' : 'Delete';
           remove.setAttribute('aria-label', (deleting ? 'Undo delete of row ' : 'Delete row ') + row.label);
@@ -130,13 +138,20 @@
           if (control.value === originalId) delete part.rows[row.key]; else part.rows[row.key] = control.value;
           show(); PiStaging.changed();
         });
+        undo.addEventListener('click', function () {
+          control.dispatchEvent(new Event('mousedown'));
+          control.value = originalId;
+          delete part.rows[row.key];
+          show(); PiStaging.changed();
+        });
         remove.addEventListener('click', function () {
           var at = part.del.indexOf(row.key);
           if (at === -1) part.del.push(row.key); else part.del.splice(at, 1);
           show(); PiStaging.changed();
         });
-        var cell = tr.insertCell(); cell.appendChild(control); cell.appendChild(flag);
-        tr.insertCell().appendChild(remove);
+        var dest = cell(tr, 'Destination'); dest.appendChild(control);
+        var line = document.createElement('div'); line.appendChild(flag); line.appendChild(undo); dest.appendChild(line);
+        cell(tr, '').appendChild(remove);
         show();
       });
       state.pane.appendChild(table);

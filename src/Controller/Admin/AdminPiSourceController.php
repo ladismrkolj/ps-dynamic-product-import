@@ -527,13 +527,15 @@ class AdminPiSourceController extends ModuleAdminController
             $repository = $category ? new \ProductImport\Repository\CategoryMappingRepository() : new \ProductImport\Repository\ManufacturerMappingRepository();
             $default = $source['default_' . $idColumn];
             $rows = [];
-            foreach ($repository->findAllForSource((int) $source['id_source']) as $row) {
+            $stored = $repository->findAllForSource((int) $source['id_source']);
+            $stale = \ProductImport\Service\StaleMappingRows::flag(array_column($stored, 'date_seen'));
+            foreach ($stored as $at => $row) {
                 $id = $row[$idColumn] === null ? null : (int) $row[$idColumn];
-                $rows[] = ['key' => $category ? $row['source_path_hash'] : $row['source_name'],
+                $rows[] = ['stale' => $stale['stale'][$at], 'mapped' => $id !== null, 'key' => $category ? $row['source_path_hash'] : $row['source_name'],
                     'label' => $category ? implode(' > ', json_decode($row['source_path'], true, 512, JSON_THROW_ON_ERROR)) : $row['source_name'],
                     'id' => $id, 'seen' => $row['date_seen'] ?: null, 'status' => $this->mappingStatus($id, $default, $names, $category)];
             }
-            $this->sendJson(['default' => $default === null ? null : (int) $default, 'rows' => $rows,
+            $this->sendJson(['default' => $default === null ? null : (int) $default, 'rows' => $rows, 'stale_cutoff' => $stale['cutoff'], 'stale_hours' => \ProductImport\Service\StaleMappingRows::WINDOW_SECONDS / 3600,
                 'options' => array_map(static function ($option) use ($idColumn) {
                     return ['id' => $option[$idColumn], 'label' => $option['label']];
                 }, $options)]);
@@ -577,13 +579,15 @@ class AdminPiSourceController extends ModuleAdminController
             $names = array_column($options, 'label', 'id_feature');
             $setting = (string) $source['unmapped_features'];
             $rows = [];
-            foreach ((new \ProductImport\Repository\FeatureMappingRepository())->findAllForSource((int) $source['id_source']) as $row) {
+            $stored = (new \ProductImport\Repository\FeatureMappingRepository())->findAllForSource((int) $source['id_source']);
+            $stale = \ProductImport\Service\StaleMappingRows::flag(array_column($stored, 'date_seen'));
+            foreach ($stored as $at => $row) {
                 $samples = json_decode((string) $row['sample_values'], true);
-                $rows[] = ['key' => $row['source_name'], 'action' => $row['action'], 'id_feature' => $row['id_feature'] === null ? null : (int) $row['id_feature'],
+                $rows[] = ['stale' => $stale['stale'][$at], 'mapped' => $row['action'] !== 'none', 'key' => $row['source_name'], 'action' => $row['action'], 'id_feature' => $row['id_feature'] === null ? null : (int) $row['id_feature'],
                     'create_name' => $row['create_name'], 'value_expression' => $row['value_expression'], 'count' => (int) $row['product_count'],
                     'samples' => is_array($samples) ? $samples : [], 'seen' => $row['date_seen'] ?: null, 'status' => $this->featureStatus($row, $setting, $names)];
             }
-            $this->sendJson(['setting' => $setting, 'rows' => $rows,
+            $this->sendJson(['setting' => $setting, 'rows' => $rows, 'stale_cutoff' => $stale['cutoff'], 'stale_hours' => \ProductImport\Service\StaleMappingRows::WINDOW_SECONDS / 3600,
                 'options' => array_map(static function ($option) {
                     return ['id' => $option['id_feature'], 'label' => $option['label']];
                 }, $options)]);
@@ -717,11 +721,27 @@ class AdminPiSourceController extends ModuleAdminController
             }
         }
         $part = $staged['feature'] ?? [];
-        if (!is_array($part) || ($part['rules'] ?? []) === [] && ($part['del'] ?? []) === []) {
+        if (!is_array($part) || ($part['rules'] ?? []) === [] && ($part['del'] ?? []) === [] && ($part['add'] ?? []) === []) {
             return;
         }
         $options = $catalog->features((int) $source['id_lang_default']);
         $repository = new \ProductImport\Repository\FeatureMappingRepository();
+        foreach ((array) ($part['add'] ?? []) as $add) {
+            $name = is_array($add) && is_string($add['name'] ?? null) ? \ProductImport\Service\NativeFields::trimText($add['name']) : '';
+            if ($name === '' || mb_strlen($name) > \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT) {
+                throw new InvalidArgumentException('Enter the feed feature name (1 to ' . \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT . ' characters).');
+            }
+            if (!$repository->createManual($idSource, $name)) {
+                throw new InvalidArgumentException('The feed feature "' . $name . '" is already in the list.');
+            }
+            if (($add['rule_action'] ?? 'none') !== 'none') {
+                [$action, $idFeature, $createName, $expression] = $this->stagedFeatureRule($add, $name, $options);
+                $repository->setRule($idSource, $name, $action, $idFeature, $createName, $expression);
+            } elseif (is_string($add['value_expression'] ?? null) && trim($add['value_expression']) !== '') {
+                [$action, $idFeature, $createName, $expression] = $this->stagedFeatureRule(['rule_action' => 'none'] + $add, $name, $options);
+                $repository->setRule($idSource, $name, $action, $idFeature, $createName, $expression);
+            }
+        }
         $deleted = array_flip(array_filter((array) ($part['del'] ?? []), 'is_string'));
         foreach ((array) ($part['rules'] ?? []) as $key => $rule) {
             if (isset($deleted[(string) $key])) {
@@ -730,32 +750,8 @@ class AdminPiSourceController extends ModuleAdminController
             if (!is_array($rule) || !$repository->findOverride($idSource, (string) $key)) {
                 throw new InvalidArgumentException('Unknown feed feature.');
             }
-            $action = $rule['rule_action'] ?? null;
-            if (!is_string($action) || !in_array($action, \ProductImport\Service\FeatureMapping::ACTIONS, true)) {
-                throw new InvalidArgumentException('Invalid action for feed feature "' . $key . '".');
-            }
-            $idFeature = null;
-            $createName = null;
-            if ($action === \ProductImport\Service\FeatureMapping::MAP) {
-                $idFeature = $this->stagedDestination($rule['feature'] ?? '', $options, 'id_feature', 'The feature');
-                if ($idFeature === null) {
-                    throw new InvalidArgumentException('Choose an existing feature for "' . $key . '".');
-                }
-            } elseif ($action === \ProductImport\Service\FeatureMapping::CREATE) {
-                $createName = is_string($rule['create_name'] ?? null) ? trim($rule['create_name']) : '';
-                if ($createName === '' || mb_strlen($createName) > \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT || !\ProductImport\Service\NativeFields::isGenericName($createName)) {
-                    throw new InvalidArgumentException('Enter the name of the feature to create for "' . $key . '" (1 to ' . \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT . ' characters, without <>={}).');
-                }
-            }
-            $expression = $rule['value_expression'] ?? '';
-            if (!is_string($expression) || mb_strlen($expression) > 5000) {
-                throw new InvalidArgumentException('The value formula of "' . $key . '" must be text of at most 5000 characters.');
-            }
-            $expression = trim($expression);
-            if ($expression !== '' && ($problem = (new \ProductImport\Service\ExpressionEvaluator())->lint($expression, ['value', 'fields'])) !== null) {
-                throw new InvalidArgumentException('Value formula of "' . $key . '": ' . $problem);
-            }
-            $repository->setRule($idSource, (string) $key, $action, $idFeature, $createName, $expression === '' ? null : $expression);
+            [$action, $idFeature, $createName, $expression] = $this->stagedFeatureRule($rule, (string) $key, $options);
+            $repository->setRule($idSource, (string) $key, $action, $idFeature, $createName, $expression);
         }
         foreach (array_keys($deleted) as $key) {
             if (!$repository->findOverride($idSource, (string) $key)) {
@@ -763,6 +759,37 @@ class AdminPiSourceController extends ModuleAdminController
             }
             $repository->delete($idSource, (string) $key);
         }
+    }
+
+    /** @return array{0: string, 1: ?int, 2: ?string, 3: ?string} action, feature id, create name and value formula of one staged feature rule, validated */
+    private function stagedFeatureRule(array $rule, string $key, array $options): array
+    {
+        $action = $rule['rule_action'] ?? null;
+        if (!is_string($action) || !in_array($action, \ProductImport\Service\FeatureMapping::ACTIONS, true)) {
+            throw new InvalidArgumentException('Invalid action for feed feature "' . $key . '".');
+        }
+        $idFeature = null;
+        $createName = null;
+        if ($action === \ProductImport\Service\FeatureMapping::MAP) {
+            $idFeature = $this->stagedDestination($rule['feature'] ?? '', $options, 'id_feature', 'The feature');
+            if ($idFeature === null) {
+                throw new InvalidArgumentException('Choose an existing feature for "' . $key . '".');
+            }
+        } elseif ($action === \ProductImport\Service\FeatureMapping::CREATE) {
+            $createName = is_string($rule['create_name'] ?? null) ? trim($rule['create_name']) : '';
+            if ($createName === '' || mb_strlen($createName) > \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT || !\ProductImport\Service\NativeFields::isGenericName($createName)) {
+                throw new InvalidArgumentException('Enter the name of the feature to create for "' . $key . '" (1 to ' . \ProductImport\Service\NativeFields::FEATURE_NAME_LIMIT . ' characters, without <>={}).');
+            }
+        }
+        $expression = $rule['value_expression'] ?? '';
+        if (!is_string($expression) || mb_strlen($expression) > 5000) {
+            throw new InvalidArgumentException('The value formula of "' . $key . '" must be text of at most 5000 characters.');
+        }
+        $expression = trim($expression);
+        if ($expression !== '' && ($problem = (new \ProductImport\Service\ExpressionEvaluator())->lint($expression, ['value', 'fields'])) !== null) {
+            throw new InvalidArgumentException('Value formula of "' . $key . '": ' . $problem);
+        }
+        return [$action, $idFeature, $createName, $expression === '' ? null : $expression];
     }
 
     private function requireSource(string $permission): array

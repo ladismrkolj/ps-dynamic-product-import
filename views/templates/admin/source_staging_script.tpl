@@ -33,11 +33,29 @@
       // The named part (category, brand, feature) with its containers created.
       part: function (name) {
         var part = data[name] = data[name] || {};
-        if (name === 'feature') { part.rules = part.rules || {}; } else { part.rows = part.rows || {}; part.add = part.add || []; }
+        if (name === 'feature') { part.rules = part.rules || {}; } else { part.rows = part.rows || {}; }
+        part.add = part.add || [];
         part.del = part.del || [];
         return part;
       },
       changed: refresh,
+      // Button that stages the deletion of every stale row (seen before, but not in the latest scan); nothing is written until Save.
+      staleButton: function (data, part, reload) {
+        var box = document.createElement('span');
+        var button = document.createElement('button'); button.type = 'button'; button.className = 'btn btn-default';
+        button.textContent = 'Mark rows not seen in the last scan for deletion';
+        var note = document.createElement('span'); note.setAttribute('aria-live', 'polite'); note.style.marginLeft = '8px';
+        button.addEventListener('click', function () {
+          var rows = data.rows.filter(function (row) { return row.stale && part.del.indexOf(row.key) === -1; });
+          if (!data.stale_cutoff || !rows.length) { note.textContent = 'No rows to mark: none was last seen more than ' + data.stale_hours + ' hours before the newest scan' + (data.stale_cutoff ? ' (' + data.stale_cutoff + ')' : '') + '.'; return; }
+          var mapped = rows.filter(function (row) { return row.mapped; }).length;
+          if (!window.confirm('Mark ' + rows.length + ' row(s) for deletion? They were last seen before ' + data.stale_cutoff + ' (more than ' + data.stale_hours + ' hours before the newest scan of this list); ' + mapped + ' of them have a mapping you set. Nothing is deleted until you press Save, and each row can be restored with Undo delete. A deleted row comes back on the next import or discovery if the feed still has the value.')) return;
+          rows.forEach(function (row) { part.del.push(row.key); });
+          refresh(); reload();
+        });
+        box.appendChild(button); box.appendChild(note);
+        return box;
+      },
       onChange: function (listener) { listeners.push(listener); },
       dirty: dirty
     };

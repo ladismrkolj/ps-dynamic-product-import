@@ -117,11 +117,11 @@ Formula syntax (the same table is in the **Formula syntax** toggle at the top of
 | `a ?? b` | Uses `b` only when `a` is null or missing; keeps `''` and `0`. `fields['stock'] ?? 0` |
 | `matches` | Regular expression test: `fields['name'] matches '/^Kite/i'` |
 | `starts with`, `ends with`, `contains` | Plain text tests: `fields['sku'] starts with 'A-'`, `fields['name'] contains 'Pro'` |
-| `in`, `not in`, `..` | List and range membership: `fields['size'] in ['S', 'M']`, `num(fields['qty']) in 1..5`, `fields['brand'] not in ['Nike']` |
+| `in`, `not in`, `..` | List and range membership (`..` is a list of whole numbers and `in` compares strictly, so it fits whole-number feed values, not text or decimals): `fields['size'] in ['S', 'M']`, `fields['qty'] in 1..5`, `fields['brand'] not in ['Nike']` |
 | `[ ]`, `{a: 1}` | List and map literals: `[fields['main'], path(fields, 'extra')]`, `{'S': 1, 'M': 2}[fields['size']]` |
 | `num(x)` | Number, or `null` if not numeric: `num(fields['price'])`. Accepts PHP numeric values and strings, not localized currency strings. |
 | `str(x)` | Text: `str(fields['id'])`. Accepts scalars, stringable objects and `null`. |
-| `regex('/p/', x)` | True if the pattern matches (false for `null`): `regex('/^A\d+$/', fields['sku'])`. A malformed pattern is an error. |
+| `regex('/p/', x)` | True if the pattern matches (false for `null`): `regex('/^A\\d+$/', fields['sku'])`. A malformed pattern is an error. |
 | `first(list)` | First entry of a list: `first(fields['images'])` |
 | `lower(s)`, `upper(s)` | Change case, accents included: `lower('ČAJ')` gives `čaj` |
 | `trim(s)` | Removes spaces at both ends: `trim(fields['name'])` |
@@ -133,6 +133,7 @@ Formula syntax (the same table is in the **Formula syntax** toggle at the top of
 | `pick(map, names)` | Keeps only the listed keys of a map, in the order of `names`. `names` is a list of keys, or a `{feed name: new name}` map that also renames. When several feed names map to the same new name the first one present wins. Missing keys, null and empty values are skipped, and a null map gives `{}`: `pick(fields['attributes'], {'Finbox': 'Fin box', 'Fin box type': 'Fin box'})`, `pick(map, ['Discipline', 'Struts'])` |
 | `row(list, keys, value)` | The first object of a list in which one of `keys` equals `value`; `keys` is a key or a list of keys. When both sides are numeric they compare as numbers (`'12.0'` equals `'12'`), otherwise as trimmed, case-insensitive text. A single object counts as a one-entry list. Gives `null` when nothing matches or `value` or `list` is `null`: `row(fields['specification_table'], 'Size', path(fields, 'variants.0.size'))` |
 | `merge(map, map, ...)` | Combines maps: later maps override the keys of earlier ones. `null` arguments are skipped: `merge(common(fields['specification_table']), row(fields['specification_table'], 'Size', 'M'))` |
+| `table(list)` | Shows a list of objects (or one object) as an HTML `<table>`: a header with all keys in first-seen order, one row per object, empty cells for missing keys, keys and values HTML-escaped. Empty and non-scalar values are skipped; a missing or empty list gives `null`. `~` turns `null` into empty text, so appending it to a description is safe: `fields['description'] ~ table(fields['specification_table'])`. The markup has no attributes or styles, so PrestaShop's description validation accepts it. |
 | `count(list)` | Number of entries, 0 for a missing list: `count(fields['images'])` |
 | Quoting | Write text in single quotes. Put a backslash before a quote inside the text: `'it\'s'`. Doubling the quote (`'it''s'`) does not work. A backslash itself is written `\\`. |
 

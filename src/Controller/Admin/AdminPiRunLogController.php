@@ -45,6 +45,10 @@ class AdminPiRunLogController extends ModuleAdminController
         foreach (['source_name' => 'Source', 'started_at' => 'Started', 'finished_at' => 'Finished', 'status' => 'Status', 'triggered_by' => 'Triggered by', 'created_count' => 'Created', 'updated_count' => 'Updated', 'unchanged_count' => 'Unchanged', 'skipped_count' => 'Skipped', 'failed_count' => 'Failed', 'deleted_count' => 'Deleted', 'error_log' => 'Errors'] as $key => $label) {
             $fields[$key] = ['title' => $this->trans($label)];
         }
-        return $helper->generateList($rows, $fields);
+        // Dates and counts stay on one line; the error text gets the remaining width.
+        $style = '<style>.table.pi_import_run { table-layout: auto; width: 100%; } .table.pi_import_run td { overflow-wrap: anywhere; }'
+            . ' .table.pi_import_run td:nth-child(1) { min-width: 90px; } .table.pi_import_run td:last-child { min-width: 150px; }</style>';
+
+        return $style . $helper->generateList($rows, $fields);
     }
 }

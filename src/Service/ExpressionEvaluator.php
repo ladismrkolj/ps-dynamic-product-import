@@ -6,12 +6,15 @@ use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
 
 class ExpressionEvaluator
 {
+    /** Every helper callable from a formula; each must be documented in the cheat sheet and the README. */
+    public const HELPERS = ['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs', 'common', 'pick', 'row', 'merge', 'table'];
+
     private $language;
 
     public function __construct()
     {
         $this->language = new ExpressionLanguage();
-        foreach (['path', 'num', 'str', 'regex', 'first', 'lower', 'upper', 'trim', 'replace', 'round', 'join', 'count', 'pairs', 'common', 'pick', 'row', 'merge'] as $name) {
+        foreach (self::HELPERS as $name) {
             $this->language->register(
                 $name,
                 static function (...$arguments) use ($name) {
@@ -322,6 +325,57 @@ class ExpressionEvaluator
         }
 
         return null;
+    }
+
+    /**
+     * A list of objects (or one object) as a plain HTML table: a header with the union of the keys in first-seen order,
+     * one row per object, missing cells empty. Keys and values are escaped; non-scalar values are skipped. Null for a
+     * missing or empty list, so `fields['description'] ~ table(...)` simply keeps the description (`~` turns null into '').
+     */
+    public static function table($list): ?string
+    {
+        if ($list === null) {
+            return null;
+        }
+        if (!is_array($list)) {
+            throw new \InvalidArgumentException('table() expects a list of objects.');
+        }
+        $rows = [];
+        $keys = [];
+        foreach (array_is_list($list) ? $list : [$list] as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            $row = [];
+            foreach ($entry as $key => $value) {
+                if (!is_scalar($value) || is_bool($value) || trim((string) $value) === '') {
+                    continue;
+                }
+                $row[(string) $key] = trim((string) $value);
+                $keys[(string) $key] = true;
+            }
+            if ($row !== []) {
+                $rows[] = $row;
+            }
+        }
+        if ($rows === []) {
+            return null;
+        }
+        $escape = static fn (string $text): string => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $html = '<table><thead><tr>';
+        foreach (array_keys($keys) as $key) {
+            $html .= '<th>' . $escape((string) $key) . '</th>';
+        }
+        $html .= '</tr></thead><tbody>';
+        foreach ($rows as $row) {
+            $html .= '<tr>';
+            foreach (array_keys($keys) as $key) {
+                $html .= '<td>' . $escape($row[(string) $key] ?? '') . '</td>';
+            }
+            $html .= '</tr>';
+        }
+
+        return $html . '</tbody></table>';
     }
 
     /** Combines maps; a later map overrides the keys of an earlier one, null arguments are skipped. */

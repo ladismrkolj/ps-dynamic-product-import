@@ -59,6 +59,20 @@ class FeatureMappingRepository
         }
     }
 
+    /** Adds a row by hand (not seen in a feed yet). Returns false when the source already has that name. */
+    public function createManual(int $idSource, string $name): bool
+    {
+        $db = \Db::getInstance();
+        if (!$db->execute(
+            'INSERT IGNORE INTO `' . _DB_PREFIX_ . self::TABLE . '` (`id_source`, `source_name`, `date_upd`) VALUES ('
+            . (int) $idSource . ", '" . pSQL($name, true) . "', '" . pSQL(date('Y-m-d H:i:s')) . "')"
+        )) {
+            throw new \RuntimeException(DbError::message('Unable to add feature row'));
+        }
+
+        return $db->Affected_Rows() > 0;
+    }
+
     /** Sets the action of an existing row. $idFeature belongs to map, $createName to create. */
     public function setAction(int $idSource, string $name, string $action, ?int $idFeature, ?string $createName): void
     {
