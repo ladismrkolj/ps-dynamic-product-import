@@ -411,8 +411,9 @@ class ExpressionEvaluator
                 if (!is_scalar($value) || is_bool($value) || trim((string) $value) === '') {
                     continue;
                 }
-                $row[(string) $key] = trim((string) $value);
-                $keys[(string) $key] = true;
+                $name = str_starts_with((string) $key, "\xEF\xBB\xBF") ? substr((string) $key, 3) : (string) $key;
+                $row[$name] = trim((string) $value);
+                $keys[$name] = ($keys[$name] ?? 0) + 1;
             }
             if ($row !== []) {
                 $rows[] = $row;
@@ -422,6 +423,17 @@ class ExpressionEvaluator
             return null;
         }
         $escape = static fn (string $text): string => htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        if (max($keys) === 1) {
+            // No name repeats: a list of single-entry objects reads as name / value rows.
+            $html = '<table><tbody>';
+            foreach ($rows as $row) {
+                foreach ($row as $name => $cell) {
+                    $html .= '<tr><th>' . $escape((string) $name) . '</th><td>' . $escape($cell) . '</td></tr>';
+                }
+            }
+
+            return $html . '</tbody></table>';
+        }
         $html = '<table><thead><tr>';
         foreach (array_keys($keys) as $key) {
             $html .= '<th>' . $escape((string) $key) . '</th>';

@@ -95,8 +95,10 @@ class FormulaReferenceTest extends TestCase
     public function testTableEscapesAndSkipsWhatItCannotShow(): void
     {
         $html = ExpressionEvaluator::table([['<b>' => 'a & "b"', 'x' => ['n'], 'y' => ''], 'junk', null, ['z' => 1]]);
-        self::assertSame('<table><thead><tr><th>&lt;b&gt;</th><th>z</th></tr></thead><tbody><tr><td>a &amp; &quot;b&quot;</td><td></td></tr><tr><td></td><td>1</td></tr></tbody></table>', $html);
-        self::assertSame('<table><thead><tr><th>A</th></tr></thead><tbody><tr><td>1</td></tr></tbody></table>', ExpressionEvaluator::table(['A' => '1']));
+        self::assertSame('<table><tbody><tr><th>&lt;b&gt;</th><td>a &amp; &quot;b&quot;</td></tr><tr><th>z</th><td>1</td></tr></tbody></table>', $html);
+        self::assertSame('<table><tbody><tr><th>A</th><td>1</td></tr></tbody></table>', ExpressionEvaluator::table(["\u{FEFF}A" => '1']));
+        self::assertSame('<table><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td></td></tr><tr><td>2</td><td>3</td></tr></tbody></table>', ExpressionEvaluator::table([['A' => '1'], ['A' => '2', 'B' => '3']]));
+        self::assertSame('<table><tbody><tr><th>Length</th><td>124</td></tr><tr><th>Width</th><td>23</td></tr></tbody></table>', ExpressionEvaluator::table([['Length' => '124'], ['Width' => '23']]));
         self::assertNull(ExpressionEvaluator::table(null));
         self::assertNull(ExpressionEvaluator::table([]));
         self::assertNull(ExpressionEvaluator::table([['x' => '']]));
